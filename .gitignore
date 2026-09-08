@@ -1,0 +1,86 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+virtualenv/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+
+# pytest
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Ruff
+.ruff_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific - temporary render files
+temp/
+tmp/
+*.tmp
+
+# Project specific - video composition temp
+temp/video_composition/
+src/video/__pycache__/
+
+# Project specific - output videos (large files)
+output/
+output_integration/
+output_colab/
+assets/output/
+*.mp4
+*.mov
+*.avi
+*.mkv
+
+# Project specific - audio cache
+temp/tts_cache/
+*.mp3
+*.wav
+
+# Project specific - image cache
+assets/images/*_pollinations.jpg
+assets/images/*_diffusers.jpg
+assets/images/*_placeholder.jpg
+
+# Logs
+logs/
+*.log
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Type checking
+*.pyi

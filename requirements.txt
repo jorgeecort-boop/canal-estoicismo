@@ -1,0 +1,26 @@
+# Core dependencies
+edge-tts>=6.1.0
+gtts>=2.5.0
+moviepy>=1.0.3
+
+# Image processing
+Pillow>=10.0.0
+requests>=2.31.0
+
+# Configuration
+python-dotenv>=1.0.0
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+
+# Type checking
+mypy>=1.5.0
+types-requests>=2.31.0
+
+# Linting
+ruff>=0.1.0
+
+# Development
+pre-commit>=3.5.0
