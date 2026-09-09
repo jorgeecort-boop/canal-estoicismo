@@ -4,7 +4,6 @@ import asyncio
 import hashlib
 import os
 import subprocess
-import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -79,7 +78,6 @@ class TTSEngine:
     ) -> float:
         """Generate audio using edge-tts CLI."""
         voice = voice or self.tts_settings.voice
-        # Use edge-specific settings without % for Windows compatibility
         rate = rate or self.tts_settings.edge_rate
         volume = volume or self.tts_settings.edge_volume
         pitch = pitch or self.tts_settings.edge_pitch
@@ -106,6 +104,49 @@ class TTSEngine:
 
         return self._get_audio_duration(output_path)
 
+    async def _generate_elevenlabs(
+        self,
+        text: str,
+        output_path: Path,
+        voice_id: Optional[str] = None,
+    ) -> float:
+        """Generate audio using ElevenLabs API (premium quality)."""
+        try:
+            import aiohttp
+        except ImportError:
+            raise RuntimeError("aiohttp required for ElevenLabs. Run: pip install aiohttp")
+
+        voice_id = voice_id or self.tts_settings.elevenlabs_voice_id
+        api_key = self.tts_settings.elevenlabs_api_key or os.getenv("ELEVENLABS_API_KEY")
+
+        if not api_key:
+            raise RuntimeError("ElevenLabs API key not configured. Set ELEVENLABS_API_KEY env var or in settings.")
+
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+        headers = {
+            "Accept": "audio/mpeg",
+            "Content-Type": "application/json",
+            "xi-api-key": api_key,
+        }
+        data = {
+            "text": text,
+            "model_id": self.tts_settings.elevenlabs_model,
+            "voice_settings": {
+                "stability": self.tts_settings.elevenlabs_stability,
+                "similarity_boost": self.tts_settings.elevenlabs_similarity_boost,
+            },
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=data, headers=headers) as resp:
+                if resp.status != 200:
+                    error = await resp.text()
+                    raise RuntimeError(f"ElevenLabs API error {resp.status}: {error}")
+                audio_data = await resp.read()
+
+        output_path.write_bytes(audio_data)
+        return self._get_audio_duration(output_path)
+
     def _generate_gtts(
         self,
         text: str,
@@ -128,7 +169,7 @@ class TTSEngine:
         self,
         text: str,
         voice: Optional[str] = None,
-        provider: Optional[Literal["edge-tts", "gtts"]] = None,
+        provider: Optional[Literal["edge-tts", "gtts", "elevenlabs"]] = None,
         use_cache: bool = True,
     ) -> TTSResult:
         """Generate audio from text."""
@@ -154,9 +195,11 @@ class TTSEngine:
         # Generate new audio
         output_path = self.settings.paths.temp_dir / f"tts_{cache_key}.mp3"
 
-        # Try primary provider, fallback to gTTS on failure
+        # Provider priority order
         providers_to_try = [provider]
-        if provider == "edge-tts":
+        if provider == "elevenlabs":
+            providers_to_try.extend(["edge-tts", "gtts"])
+        elif provider == "edge-tts":
             providers_to_try.append("gtts")
 
         last_error = None
@@ -166,6 +209,8 @@ class TTSEngine:
                     duration = await self._generate_edge_tts(text, output_path, voice)
                 elif prov == "gtts":
                     duration = self._generate_gtts(text, output_path)
+                elif prov == "elevenlabs":
+                    duration = await self._generate_elevenlabs(text, output_path)
                 else:
                     raise ValueError(f"Unknown provider: {prov}")
 
@@ -187,14 +232,10 @@ class TTSEngine:
 
             except Exception as e:
                 last_error = e
-                if prov == "edge-tts":
-                    print(f"   [WARN] edge-tts failed, trying gTTS: {e}")
-                    # Cleanup and try next provider
-                    if output_path.exists():
-                        output_path.unlink(missing_ok=True)
-                    continue
-                else:
-                    break
+                print(f"   [WARN] {prov} failed: {e}")
+                if output_path.exists():
+                    output_path.unlink(missing_ok=True)
+                continue
 
         # All providers failed
         raise RuntimeError(f"All TTS providers failed. Last error: {last_error}") from last_error
@@ -202,7 +243,7 @@ class TTSEngine:
     async def generate_for_scene(
         self,
         scene,
-        provider: Optional[Literal["edge-tts", "gtts"]] = None,
+        provider: Optional[Literal["edge-tts", "gtts", "elevenlabs"]] = None,
     ) -> TTSResult:
         """Generate audio for a Scene object."""
         result = await self.generate(scene.voiceover_text, provider=provider)
@@ -213,7 +254,7 @@ class TTSEngine:
     async def generate_for_story(
         self,
         story,
-        provider: Optional[Literal["edge-tts", "gtts"]] = None,
+        provider: Optional[Literal["edge-tts", "gtts", "elevenlabs"]] = None,
         progress_callback=None,
     ) -> list[TTSResult]:
         """Generate audio for all scenes in a story."""
@@ -237,7 +278,7 @@ class TTSEngine:
 def generate_tts_sync(
     text: str,
     voice: Optional[str] = None,
-    provider: Optional[Literal["edge-tts", "gtts"]] = None,
+    provider: Optional[Literal["edge-tts", "gtts", "elevenlabs"]] = None,
     settings=None,
 ) -> TTSResult:
     """Synchronous TTS generation."""

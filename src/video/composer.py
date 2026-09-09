@@ -432,12 +432,26 @@ class VideoComposer:
             return False
 
     def _concatenate_videos(self, scene_paths: list[Path], output_path: Path) -> bool:
-        """Concatenate scene videos into final video using MoviePy."""
+        """Concatenate scene videos into final video using MoviePy with crossfade transitions."""
         try:
-            from moviepy import VideoFileClip, concatenate_videoclips
+            from moviepy import VideoFileClip, concatenate_videoclips, CompositeVideoClip
             
             clips = [VideoFileClip(str(p)) for p in scene_paths]
-            final = concatenate_videoclips(clips, method="compose")
+            
+            # Add crossfade transitions between clips
+            transition_duration = 0.8  # seconds
+            
+            # Method: Use concatenate_videoclips with crossfade
+            # For smooth transitions, we overlap clips slightly
+            final = concatenate_videoclips(
+                clips, 
+                method="compose",
+                padding=-transition_duration,  # Overlap for crossfade
+            )
+            
+            # Alternative: Manual crossfade for more control
+            # final = self._apply_crossfade_transitions(clips, transition_duration)
+            
             final.write_videofile(
                 str(output_path),
                 fps=self.video_settings.fps,
@@ -457,6 +471,34 @@ class VideoComposer:
             print(f"   [ERROR] Concatenation failed: {e}")
             # Fallback to FFmpeg concat
             return self._concatenate_videos_ffmpeg(scene_paths, output_path)
+
+    def _apply_crossfade_transitions(self, clips: list, transition_duration: float):
+        """Apply manual crossfade transitions between clips."""
+        from moviepy import CompositeVideoClip
+        
+        if len(clips) <= 1:
+            return clips[0]
+        
+        # Start with first clip
+        result = clips[0]
+        current_time = result.duration
+        
+        for i in range(1, len(clips)):
+            next_clip = clips[i]
+            
+            # Create crossfade by overlapping
+            # Fade out current, fade in next
+            fade_out = result.with_effects([lambda c: c.fadeout(transition_duration)])
+            fade_in = next_clip.with_effects([lambda c: c.fadein(transition_duration)])
+            
+            # Position next clip to start before current ends
+            fade_in = fade_in.with_start(current_time - transition_duration)
+            
+            # Composite them
+            result = CompositeVideoClip([result, fade_in])
+            current_time = result.duration - transition_duration
+        
+        return result
 
     def _concatenate_videos_ffmpeg(self, scene_paths: list[Path], output_path: Path) -> bool:
         """Concatenate using FFmpeg (fallback)."""

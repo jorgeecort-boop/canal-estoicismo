@@ -13,8 +13,9 @@ class VideoSettings:
     height: int = 1080
     fps: int = 30
     codec: str = "libx264"
-    bitrate: str = "8000k"
-    preset: str = "medium"
+    bitrate: str = "12000k"
+    preset: str = "slow"
+    crf: int = 18
     audio_codec: str = "aac"
     audio_bitrate: str = "192k"
 
@@ -66,21 +67,45 @@ class KenBurnsSettings:
 @dataclass(frozen=True)
 class TTSSettings:
     """Text-to-Speech configuration."""
-    provider: Literal["gtts", "edge-tts"] = "gtts"
-    voice: str = "es-ES-AlvaroNeural"
+    provider: Literal["gtts", "edge-tts", "elevenlabs"] = "edge-tts"
+    
+    # Edge-TTS voices (free, good quality)
+    # Mature male narrator voices:
+    # es-ES-AlvaroNeural - Spanish male, mature
+    # es-MX-JorgeNeural - Mexican male, deep
+    # es-AR-TomasNeural - Argentinian male
+    # en-US-GuyNeural - English male, deep (for English content)
+    voice: str = "es-MX-JorgeNeural"  # Best mature male Spanish voice
+    
+    # Alternative voices for testing
+    voice_alternatives: tuple = (
+        "es-MX-JorgeNeural",    # Mexican, deep mature male
+        "es-ES-AlvaroNeural",   # Spanish, mature male
+        "es-AR-TomasNeural",    # Argentinian, mature male
+        "en-US-GuyNeural",      # English US, deep male
+        "en-GB-RyanNeural",     # English UK, mature male
+    )
+    
     rate: str = "-15%"
     volume: str = "+0%"
     pitch: str = "-10Hz"
     language: str = "es"
 
-    # gTTS settings
+    # gTTS settings (fallback)
     gtts_lang: str = "es"
-    gtts_tld: str = "com"
+    gtts_tld: str = "com.mx"  # Mexican Spanish
 
     # edge-tts CLI format (without % for Windows compatibility)
     edge_rate: str = "-15"
     edge_volume: str = "+0"
     edge_pitch: str = "-10Hz"
+
+    # ElevenLabs (premium, best quality - requires API key)
+    elevenlabs_api_key: str = ""
+    elevenlabs_voice_id: str = "pNInz6obpgDQGcFmaJgB"  # Adam - deep mature male
+    elevenlabs_model: str = "eleven_multilingual_v2"
+    elevenlabs_stability: float = 0.5
+    elevenlabs_similarity_boost: float = 0.75
 
 
 @dataclass(frozen=True)

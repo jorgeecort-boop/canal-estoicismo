@@ -50,7 +50,7 @@ class TestTTSEngine:
         return TTSEngine(settings)
 
     def test_engine_initialization(self, engine):
-        assert engine.tts_settings.provider == "gtts"
+        assert engine.tts_settings.provider == "edge-tts"
         assert engine._cache_dir.exists()
 
     def test_get_cache_key(self, engine):
@@ -129,7 +129,7 @@ class TestTTSEngine:
 
         assert result.audio_path == cached_path
         assert result.duration == 5.0
-        assert result.provider == "gtts"
+        assert result.provider == "edge-tts"
         mock_gen.assert_not_called()
 
     @pytest.mark.asyncio

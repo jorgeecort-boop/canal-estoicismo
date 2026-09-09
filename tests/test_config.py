@@ -54,8 +54,8 @@ class TestKenBurnsSettings:
 class TestTTSSettings:
     def test_default_values(self):
         s = TTSSettings()
-        assert s.provider == "gtts"
-        assert s.voice == "es-ES-AlvaroNeural"
+        assert s.provider == "edge-tts"
+        assert s.voice == "es-MX-JorgeNeural"
         assert s.rate == "-15%"
 
 
