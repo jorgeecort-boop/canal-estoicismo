@@ -3,15 +3,28 @@
 import os
 import json
 import asyncio
+import warnings
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 from pathlib import Path
 
+# Suppress deprecation warning for google.generativeai
+warnings.filterwarnings("ignore", category=FutureWarning, module="google.generativeai")
+
+# Try new google.genai first, fallback to deprecated google.generativeai
 try:
-    import google.generativeai as genai
-    GENAI_AVAILABLE = True
+    from google import genai as genai_new
+    GENAI_NEW_AVAILABLE = True
 except ImportError:
-    GENAI_AVAILABLE = False
+    GENAI_NEW_AVAILABLE = False
+
+try:
+    import google.generativeai as genai_old
+    GENAI_OLD_AVAILABLE = True
+except ImportError:
+    GENAI_OLD_AVAILABLE = False
+
+GENAI_AVAILABLE = GENAI_NEW_AVAILABLE or GENAI_OLD_AVAILABLE
 
 from config import get_settings
 from src.narrative import Scene, Story
@@ -34,6 +47,7 @@ class GoogleAIService:
         self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
         self.model_name = model
         self.model = None
+        self._use_new_api = False
         self._init_model()
 
     def _init_model(self):
@@ -44,33 +58,61 @@ class GoogleAIService:
             print("[WARN] GOOGLE_API_KEY not set. Set via environment variable.")
             return
         try:
-            genai.configure(api_key=self.api_key)
-            self.model = genai.GenerativeModel(self.model_name)
-            print(f"[OK] Gemini model initialized: {self.model_name}")
+            # Try new google.genai API first
+            if GENAI_NEW_AVAILABLE:
+                self._client = genai_new.Client(api_key=self.api_key)
+                self._use_new_api = True
+                print(f"[OK] Gemini model initialized (new API): {self.model_name}")
+            elif GENAI_OLD_AVAILABLE:
+                import google.generativeai as genai
+                genai.configure(api_key=self.api_key)
+                self.model = genai.GenerativeModel(self.model_name)
+                self._use_new_api = False
+                print(f"[OK] Gemini model initialized (legacy API): {self.model_name}")
+            else:
+                print("[WARN] No Gemini API available")
         except Exception as e:
             print(f"[ERROR] Failed to initialize Gemini: {e}")
 
     def generate_story(self, theme: str, num_scenes: int = 5, target_duration_min: float = 4.0) -> Optional[StoicStoryData]:
         """Generate a stoic story using Gemini."""
-        if not self.model:
+        if not self.model and not getattr(self, '_client', None):
             return None
 
         prompt = self._build_story_prompt(theme, num_scenes, target_duration_min)
 
         try:
-            response = self.model.generate_content(
-                prompt,
-                generation_config=genai.types.GenerationConfig(
-                    temperature=0.7,
-                    top_p=0.9,
-                    top_k=40,
-                    max_output_tokens=8192,
-                    response_mime_type="application/json",
+            if self._use_new_api:
+                # New google.genai API
+                response = self._client.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt,
+                    config={
+                        "temperature": 0.7,
+                        "top_p": 0.9,
+                        "top_k": 40,
+                        "max_output_tokens": 8192,
+                        "response_mime_type": "application/json",
+                    }
                 )
-            )
+                response_text = response.text
+            else:
+                # Legacy google.generativeai API
+                import google.generativeai as genai
+                response = self.model.generate_content(
+                    prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        temperature=0.7,
+                        top_p=0.9,
+                        top_k=40,
+                        max_output_tokens=8192,
+                        response_mime_type="application/json",
+                    )
+                )
+                response_text = response.text
 
-            if response.text:
-                data = json.loads(response.text)
+            if response_text:
+                data = json.loads(response_text)
                 return StoicStoryData(**data)
         except Exception as e:
             print(f"[ERROR] Gemini story generation failed: {e}")

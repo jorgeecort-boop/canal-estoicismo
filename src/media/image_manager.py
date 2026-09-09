@@ -39,7 +39,16 @@ class ImageManager:
     def __init__(self, settings=None):
         self.settings = settings or get_settings()
         self.image_settings = self.settings.image
-        self._assets_dir = self.settings.paths.assets_dir / "images"
+        # Handle both PathSettings object and SimpleNamespace
+        paths = self.settings.paths
+        if hasattr(paths, 'assets_dir'):
+            assets_root = paths.assets_dir
+        elif hasattr(paths, 'project_root'):
+            assets_root = paths.project_root / "assets"
+        else:
+            # Fallback
+            assets_root = Path("assets")
+        self._assets_dir = assets_root / "images"
         self._assets_dir.mkdir(parents=True, exist_ok=True)
         self._rng = random.Random()
 

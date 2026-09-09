@@ -23,7 +23,7 @@ from src.audio import TTSEngine
 from src.media import ImageManager
 from src.video import VideoComposer
 from src.services.google_ai import GoogleAIService, create_story_from_gemini
-from config import get_settings, GoogleAIService as ConfigGoogleAI
+from config import get_settings
 
 
 class ProIntegrationTest:
@@ -87,11 +87,9 @@ class ProIntegrationTest:
 
             # Prompt mejorado con estilo cinematográfico
             base_prompt = scene.image_prompt
-            enhanced = GoogleAIConfig().enhance_image_prompt(base_prompt, style) if hasattr(GoogleAIConfig, 'enhance_image_prompt') else base_prompt
-            
-            # Si no hay método enhance, usar prompt manual
-            if not hasattr(GoogleAIConfig, 'enhance_image_prompt'):
-                enhanced = f"{base_prompt}, cinematic stoic aesthetic, ancient Greek/Roman philosophy visualization, marble statue, classical art, dramatic chiaroscuro lighting, volumetric fog, atmospheric mist, deep shadows, golden hour light rays, weathered stone textures, timeless atmosphere, 8k resolution, masterpiece, highly detailed, photorealistic"
+            # Use the enhance_image_prompt from google_ai service
+            from src.services.google_ai import GoogleAIService
+            enhanced = GoogleAIService().enhance_image_prompt(base_prompt, style)
 
             negative = "bright, colorful, cartoon, anime, modern, text, watermark, signature, blurry, low quality, distorted, ugly, oversaturated, watermark, username, logo, watermark text"
 
