@@ -32,23 +32,19 @@ class ProIntegrationTest:
     def __init__(self, output_dir: Path, draft_mode: bool = False, use_gemini: bool = True, use_elevenlabs: bool = False):
         self.output_dir = output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.settings = get_settings(draft_mode=draft_mode)
         self.draft_mode = draft_mode
         self.use_gemini = use_gemini
         self.use_elevenlabs = use_elevenlabs
 
-        # Configurar voz masculina madura
-        if not draft_mode:
-            self.settings.tts.voice = "es-MX-JorgeNeural"  # Voz mexicana profunda
-            self.settings.tts.provider = "elevenlabs" if use_elevenlabs else "edge-tts"
-        
-        # Calidad de video alta
-        self.settings.video.bitrate = "12000k"
-        self.settings.video.preset = "slow"
-        self.settings.video.crf = 18
+        # Configurar voz y proveedor
+        self.voice = "es-MX-JorgeNeural" if not draft_mode else "es-ES-AlvaroNeural"
+        self.provider = "elevenlabs" if (use_elevenlabs and not draft_mode) else "edge-tts"
+
+        # Settings base
+        self.settings = get_settings(draft_mode=draft_mode)
 
         # Inicializar módulos
-        self.story_gen = None  # Se inicializa con Gemini
+        self.story_gen = None
         self.tts_engine = TTSEngine(self.settings)
         self.img_manager = ImageManager(self.settings)
         self.composer = VideoComposer(self.settings)
@@ -250,12 +246,11 @@ class ProIntegrationTest:
 
         # 2. GENERAR AUDIO (Voz masculina madura)
         print("\n[2/5] GENERANDO NARRACIÓN (Voz masculina madura)...")
-        provider = "elevenlabs" if self.use_elevenlabs else "edge-tts"
-        print(f"   Proveedor: {provider} | Voz: {self.settings.tts.voice}")
+        print(f"   Proveedor: {self.provider} | Voz: {self.voice}")
         
         for scene in story.scenes:
             print(f"   Escena {scene.scene_number}...")
-            result = await self.tts_engine.generate(scene.voiceover_text, provider=provider)
+            result = await self.tts_engine.generate(scene.voiceover_text, voice=self.voice, provider=self.provider)
             scene.audio_path = result.audio_path
             scene.estimated_duration = result.duration
             print(f"     Duración: {result.duration:.1f}s | Proveedor usado: {result.provider}")
@@ -288,7 +283,7 @@ class ProIntegrationTest:
         print(f"Resolución: {result.resolution[0]}x{result.resolution[1]} @ {result.fps}fps")
         print(f"Bitrate: {self.settings.video.bitrate} | Preset: {self.settings.video.preset}")
         print(f"Tamaño: {result.file_size / 1e6:.1f} MB")
-        print(f"Voz: {self.settings.tts.voice} ({provider})")
+        print(f"Voz: {self.voice} ({self.provider})")
         print(f"{'='*70}")
 
         return result.output_path
