@@ -195,7 +195,18 @@ class VideoComposer:
                                   output_path: Path, scene_duration: float, scene_number: int) -> bool:
         """Apply Ken Burns effect and text overlay using MoviePy (v2.x)."""
         try:
-            from moviepy import ImageClip, AudioFileClip, TextClip, CompositeVideoClip, concatenate_videoclips, VideoFileClip, VideoClip
+            # Try direct imports first (MoviePy 2.x)
+            try:
+                from moviepy import ImageClip, AudioFileClip, TextClip, CompositeVideoClip, concatenate_videoclips, VideoFileClip, VideoClip
+            except ImportError:
+                # Fallback for older versions or different structures
+                from moviepy.video.VideoClip import ImageClip
+                from moviepy.audio.io.AudioFileClip import AudioFileClip
+                from moviepy.video.TextClip import TextClip
+                from moviepy.video.CompositeVideoClip import CompositeVideoClip, concatenate_videoclips
+                from moviepy.video.io.VideoFileClip import VideoFileClip
+                from moviepy.video.VideoClip import VideoClip
+            
             from PIL import Image, ImageDraw, ImageFont
             import numpy as np
             import random
@@ -434,7 +445,11 @@ class VideoComposer:
     def _concatenate_videos(self, scene_paths: list[Path], output_path: Path) -> bool:
         """Concatenate scene videos into final video using MoviePy with crossfade transitions."""
         try:
-            from moviepy import VideoFileClip, concatenate_videoclips, CompositeVideoClip
+            try:
+                from moviepy import VideoFileClip, concatenate_videoclips, CompositeVideoClip
+            except ImportError:
+                from moviepy.video.io.VideoFileClip import VideoFileClip
+                from moviepy.video.CompositeVideoClip import concatenate_videoclips, CompositeVideoClip
             
             clips = [VideoFileClip(str(p)) for p in scene_paths]
             
@@ -474,7 +489,10 @@ class VideoComposer:
 
     def _apply_crossfade_transitions(self, clips: list, transition_duration: float):
         """Apply manual crossfade transitions between clips."""
-        from moviepy import CompositeVideoClip
+        try:
+            from moviepy import CompositeVideoClip
+        except ImportError:
+            from moviepy.video.CompositeVideoClip import CompositeVideoClip
         
         if len(clips) <= 1:
             return clips[0]
