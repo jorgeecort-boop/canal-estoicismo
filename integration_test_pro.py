@@ -3,8 +3,8 @@
 Script de Integración Completa - Versión PRO
 Genera videos de alta calidad usando:
 - Historias: Google Gemini API (guiones profesionales)
-- Imágenes: SDXL Turbo / Imagen 3 (GPU T4) con prompts cinematográficos mejorados
-- Voz: ElevenLabs (premium) / Edge-TTS (voces masculinas maduras: es-MX-JorgeNeural)
+- Imágenes: SDXL Turbo (GPU T4) con prompts cinematográficos mejorados
+- Voz: Edge-TTS (voces masculinas maduras gratis: es-MX-JorgeNeural)
 - Video: MoviePy con transiciones crossfade, Ken Burns suave, 1080p alto bitrate
 """
 
@@ -29,16 +29,15 @@ from config import get_settings
 class ProIntegrationTest:
     """Test de integración profesional para reels de alta calidad."""
 
-    def __init__(self, output_dir: Path, draft_mode: bool = False, use_gemini: bool = True, use_elevenlabs: bool = False):
+    def __init__(self, output_dir: Path, draft_mode: bool = False, use_gemini: bool = True):
         self.output_dir = output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.draft_mode = draft_mode
         self.use_gemini = use_gemini
-        self.use_elevenlabs = use_elevenlabs
 
-        # Configurar voz y proveedor
+        # Configurar voz (solo Edge-TTS gratis)
         self.voice = "es-MX-JorgeNeural" if not draft_mode else "es-ES-AlvaroNeural"
-        self.provider = "elevenlabs" if (use_elevenlabs and not draft_mode) else "edge-tts"
+        self.provider = "edge-tts"
 
         # Settings base
         self.settings = get_settings(draft_mode=draft_mode)
@@ -301,25 +300,19 @@ async def main():
     parser.add_argument("--output", default="./output_pro", help="Directorio de salida")
     parser.add_argument("--draft", action="store_true", help="Modo draft (2s/escena)")
     parser.add_argument("--no-gemini", action="store_true", help="Usar plantillas locales en lugar de Gemini")
-    parser.add_argument("--elevenlabs", action="store_true", help="Usar ElevenLabs para voz premium (requiere API key)")
 
     args = parser.parse_args()
 
     output_dir = Path(args.output)
     draft_mode = args.draft
     use_gemini = not args.no_gemini
-    use_elevenlabs = args.elevenlabs
 
-    # Verificar API keys si se usan servicios premium
+    # Verificar API keys (solo Gemini)
     if use_gemini and not os.getenv("GOOGLE_API_KEY"):
         print("[WARN] GOOGLE_API_KEY no configurado. Usando plantillas locales.")
         use_gemini = False
-    
-    if use_elevenlabs and not os.getenv("ELEVENLABS_API_KEY"):
-        print("[WARN] ELEVENLABS_API_KEY no configurado. Usando Edge-TTS.")
-        use_elevenlabs = False
 
-    test = ProIntegrationTest(output_dir, draft_mode=draft_mode, use_gemini=use_gemini, use_elevenlabs=use_elevenlabs)
+    test = ProIntegrationTest(output_dir, draft_mode=draft_mode, use_gemini=use_gemini)
 
     try:
         video_path = await test.run_test(args.theme, args.scenes)

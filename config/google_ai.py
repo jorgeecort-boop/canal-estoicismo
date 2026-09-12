@@ -1,4 +1,4 @@
-"""Google AI configuration."""
+"""Google AI configuration - Solo servicios GRATIS."""
 
 import os
 
@@ -13,18 +13,13 @@ GEMINI_MODEL = "gemini-1.5-pro"
 # Imagen model for image generation (if available)
 IMAGEN_MODEL = "imagen-3.0-generate-002"
 
-# TTS Configuration - Better voices
-# Edge-TTS Spanish male voices (mature narrator style):
-# - es-ES-AlvaroNeural (Spanish male, mature)
-# - es-MX-JorgeNeural (Mexican male, deep) - RECOMMENDED
-# - es-AR-TomasNeural (Argentinian male)
-# - en-US-GuyNeural (English US, deep male)
-# - en-GB-RyanNeural (English UK, mature male)
-
-# ElevenLabs (premium, best quality - requires API key):
-# - "pNInz6obpgDQGcFmaJgB" (Adam - deep, mature male)
-# - "onwK4e9ZLuTAKqWW03F9" (Daniel - British, mature)
-# - "VR6AewLTigWG4xSOukaG" (Arnold - deep, authoritative)
+# TTS - Solo Edge-TTS (gratis, sin API key)
+# Voces masculinas maduras recomendadas:
+# - es-MX-JorgeNeural (Mexicano, profundo) - RECOMENDADO
+# - es-ES-AlvaroNeural (Español, maduro)
+# - es-AR-TomasNeural (Argentino, maduro)
+# - en-US-GuyNeural (Inglés US, profundo)
+# - en-GB-RyanNeural (Inglés UK, maduro)
 
 # Video Quality Settings
 VIDEO_CRF = 18  # Lower = better quality (18-23 good range)
