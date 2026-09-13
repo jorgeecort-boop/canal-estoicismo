@@ -214,7 +214,7 @@ class ProIntegrationTest:
         print(f"Escenas: {num_scenes}")
         print(f"Modo: {'DRAFT' if self.draft_mode else 'PRODUCCIÓN'}")
         print(f"Gemini: {'Sí' if self.use_gemini else 'No (plantillas locales)'}")
-        print(f"ElevenLabs: {'Sí' if self.use_elevenlabs else 'No (Edge-TTS)'}")
+        print(f"Voz: Edge-TTS (es-MX-JorgeNeural)")
         print(f"Salida: {self.output_dir}")
         print("=" * 70)
 
