@@ -80,24 +80,18 @@ class TestTTSEngine:
         assert duration == 0.0
 
     @pytest.mark.asyncio
-    @patch("src.audio.tts_engine.asyncio.create_subprocess_exec")
-    async def test_generate_edge_tts_success(self, mock_exec, engine):
-        mock_proc = AsyncMock()
-        mock_proc.communicate.return_value = (b"", b"")
-        mock_proc.returncode = 0
-        mock_exec.return_value = mock_proc
+    @patch("edge_tts.Communicate.save")
+    async def test_generate_edge_tts_success(self, mock_save, engine):
+        mock_save.return_value = None
 
         with patch.object(engine, "_get_audio_duration", return_value=10.0):
             duration = await engine._generate_edge_tts("Test text", Path("/tmp/out.mp3"))
             assert duration == 10.0
 
     @pytest.mark.asyncio
-    @patch("src.audio.tts_engine.asyncio.create_subprocess_exec")
-    async def test_generate_edge_tts_failure(self, mock_exec, engine):
-        mock_proc = AsyncMock()
-        mock_proc.communicate.return_value = (b"", b"Error message")
-        mock_proc.returncode = 1
-        mock_exec.return_value = mock_proc
+    @patch("edge_tts.Communicate.save")
+    async def test_generate_edge_tts_failure(self, mock_save, engine):
+        mock_save.side_effect = RuntimeError("edge-tts failed")
 
         with pytest.raises(RuntimeError, match="edge-tts failed"):
             await engine._generate_edge_tts("Test text", Path("/tmp/out.mp3"))

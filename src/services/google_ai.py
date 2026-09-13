@@ -120,7 +120,7 @@ class GoogleAIService:
 
         return None
 
-def _build_story_prompt(self, theme: str, num_scenes: int, target_duration_min: float) -> str:
+    def _build_story_prompt(self, theme: str, num_scenes: int, target_duration_min: float) -> str:
         return f"""
 Eres un experto en filosofía estoica y guionista de documentales. Genera una historia estoica para un video de YouTube de {target_duration_min} minutos, dividida en {num_scenes} escenas.
 

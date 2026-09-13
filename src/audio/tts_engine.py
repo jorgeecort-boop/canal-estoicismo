@@ -8,7 +8,7 @@ import time
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing: Literal, Optional
+from typing import Literal, Optional
 
 from config import get_settings
 
@@ -87,8 +87,7 @@ class TTSEngine:
         voice = voice or self.tts_settings.voice
         rate = rate or self.tts_settings.edge_rate
         volume = volume or self.tts_settings.edge_volume
-        # pitch sin "Hz" para edge-tts Python library
-        pitch = (pitch or self.tts_settings.edge_pitch).replace("Hz", "")
+        pitch = pitch or self.tts_settings.edge_pitch
 
         communicate = Communicate(
             text=text,
