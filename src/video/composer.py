@@ -272,8 +272,9 @@ class VideoComposer:
 
             # Add text overlay using MoviePy's TextClip
             try:
+                # MoviePy 2.x compatible TextClip - avoid font parameter conflict
                 txt_clip = TextClip(
-                    text_overlay,
+                    text=text_overlay,
                     font_size=self.font_settings.size,
                     color=self.font_settings.color,
                     stroke_color=self.font_settings.stroke_color,
