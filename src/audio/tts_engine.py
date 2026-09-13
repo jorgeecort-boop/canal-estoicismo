@@ -5,9 +5,10 @@ import hashlib
 import os
 import subprocess
 import time
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Optional
+from typing: Literal, Optional
 
 from config import get_settings
 
@@ -34,13 +35,14 @@ class TTSResult:
 
 
 class TTSEngine:
-    """Text-to-Speech engine - Solo proveedores GRATIS (Edge-TTS + gTTS)."""
+    """Text-to-Speech engine - Proveedores GRATIS (Edge-TTS + HF + gTTS)."""
 
     def __init__(self, settings=None):
         self.settings = settings or get_settings()
         self.tts_settings = self.settings.tts
         self._cache_dir = self.settings.paths.temp_dir / "tts_cache"
         self._cache_dir.mkdir(parents=True, exist_ok=True)
+        self._hf_pipeline = None
 
     def _get_cache_key(self, text: str, voice: str, rate: str) -> str:
         """Generate cache key for text."""
@@ -117,14 +119,107 @@ class TTSEngine:
 
         return self._get_audio_duration(output_path)
 
+    def _get_hf_pipeline(self, model_id: str = "facebook/mms-tts-spa"):
+        """Get or create Hugging Face TTS pipeline (cached)."""
+        if self._hf_pipeline is None:
+            try:
+                from transformers import pipeline
+                # Suppress warnings
+                warnings.filterwarnings("ignore", category=UserWarning, module="transformers")
+                self._hf_pipeline = pipeline(
+                    "text-to-speech",
+                    model=model_id,
+                    device=0 if __import__('torch').cuda.is_available() else -1,
+                )
+                print(f"   [INFO] Hugging Face TTS loaded: {model_id}")
+            except Exception as e:
+                raise RuntimeError(f"Failed to load HF TTS pipeline: {e}")
+        return self._hf_pipeline
+
+    async def _generate_hf_tts(
+        self,
+        text: str,
+        output_path: Path,
+        model_id: str = "facebook/mms-tts-spa",
+    ) -> float:
+        """Generate audio using Hugging Face Transformers TTS (gratis, local)."""
+        try:
+            import torch
+            import torchaudio
+        except ImportError:
+            raise RuntimeError("torch/torchaudio not installed. Run: pip install torch torchaudio")
+
+        # Get pipeline (cached)
+        pipe = self._get_hf_pipeline(model_id)
+
+        try:
+            # Generate audio
+            # For MMS-TTS, the pipeline returns dict with 'audio' and 'sampling_rate'
+            result = pipe(text)
+            
+            audio_array = result["audio"]
+            sampling_rate = result["sampling_rate"]
+            
+            # Convert to torch tensor if needed
+            if isinstance(audio_array, list):
+                audio_array = torch.tensor(audio_array)
+            elif not isinstance(audio_array, torch.Tensor):
+                audio_array = torch.tensor(audio_array)
+            
+            # Ensure 2D tensor [channels, samples]
+            if audio_array.dim() == 1:
+                audio_array = audio_array.unsqueeze(0)
+            
+            # Save as wav first, then convert to mp3
+            wav_path = output_path.with_suffix('.wav')
+            torchaudio.save(str(wav_path), audio_array, sampling_rate)
+            
+            # Convert to mp3 using ffmpeg
+            cmd = [
+                "ffmpeg", "-y", "-i", str(wav_path),
+                "-codec:a", "libmp3lame", "-q:a", "2",
+                str(output_path)
+            ]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            await proc.communicate()
+            
+            # Cleanup wav
+            if wav_path.exists():
+                wav_path.unlink(missing_ok=True)
+            
+            return self._get_audio_duration(output_path)
+            
+        except Exception as e:
+            raise RuntimeError(f"HF TTS generation failed: {e}")
+
+    def _generate_gtts(
+        self,
+        text: str,
+        output_path: Path,
+        lang: Optional[str] = None,
+        tld: Optional[str] = None,
+    ) -> float:
+        """Generate audio using gTTS (gratis, fallback)."""
+        from gtts import gTTS
+
+        lang = lang or self.tts_settings.gtts_lang
+        tld = tld or self.tts_settings.gtts_tld
+
+        tts = gTTS(text=text, lang=lang, tld=tld, slow=False)
+        tts.save(str(output_path))
+
+        return self._get_audio_duration(output_path)
+
     async def generate(
         self,
         text: str,
         voice: Optional[str] = None,
-        provider: Optional[Literal["edge-tts", "gtts"]] = None,
+        provider: Optional[Literal["edge-tts", "hf", "gtts"]] = None,
         use_cache: bool = True,
     ) -> TTSResult:
-        """Generate audio from text - Solo proveedores gratis."""
+        """Generate audio from text - Proveedores gratis."""
 
         provider = provider or self.tts_settings.provider
         voice = voice or self.tts_settings.voice
@@ -147,16 +242,21 @@ class TTSEngine:
         # Generate new audio
         output_path = self.settings.paths.temp_dir / f"tts_{cache_key}.mp3"
 
-        # Provider priority: edge-tts first (mejor voz), gtts fallback
+        # Provider priority order
         providers_to_try = [provider]
         if provider == "edge-tts":
-            providers_to_try.append("gtts")
+            providers_to_try.extend(["hf", "gtts"])
+        elif provider == "hf":
+            providers_to_try.extend(["edge-tts", "gtts"])
 
         last_error = None
         for prov in providers_to_try:
             try:
                 if prov == "edge-tts":
                     duration = await self._generate_edge_tts(text, output_path, voice)
+                elif prov == "hf":
+                    # Use MMS-TTS Spanish model for best quality
+                    duration = await self._generate_hf_tts(text, output_path)
                 elif prov == "gtts":
                     duration = self._generate_gtts(text, output_path)
                 else:
@@ -190,7 +290,7 @@ class TTSEngine:
     async def generate_for_scene(
         self,
         scene,
-        provider: Optional[Literal["edge-tts", "gtts"]] = None,
+        provider: Optional[Literal["edge-tts", "hf", "gtts"]] = None,
     ) -> TTSResult:
         """Generate audio for a Scene object."""
         result = await self.generate(scene.voiceover_text, voice=self.tts_settings.voice, provider=provider)
@@ -201,7 +301,7 @@ class TTSEngine:
     async def generate_for_story(
         self,
         story,
-        provider: Optional[Literal["edge-tts", "gtts"]] = None,
+        provider: Optional[Literal["edge-tts", "hf", "gtts"]] = None,
         progress_callback=None,
     ) -> list[TTSResult]:
         """Generate audio for all scenes in a story."""
@@ -225,7 +325,7 @@ class TTSEngine:
 def generate_tts_sync(
     text: str,
     voice: Optional[str] = None,
-    provider: Optional[Literal["edge-tts", "gtts"]] = None,
+    provider: Optional[Literal["edge-tts", "hf", "gtts"]] = None,
     settings=None,
 ) -> TTSResult:
     """Synchronous TTS generation."""

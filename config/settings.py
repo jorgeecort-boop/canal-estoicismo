@@ -67,7 +67,7 @@ class KenBurnsSettings:
 @dataclass(frozen=True)
 class TTSSettings:
     """Text-to-Speech configuration - Solo opciones GRATIS sin facturación."""
-    provider: Literal["gtts", "edge-tts"] = "edge-tts"
+    provider: Literal["gtts", "edge-tts", "hf"] = "edge-tts"
     
     # Edge-TTS voices (gratis, sin API key, alta calidad)
     # Voces masculinas maduras recomendadas:
@@ -77,6 +77,13 @@ class TTSSettings:
     # en-US-GuyNeural - Inglés US, profundo
     # en-GB-RyanNeural - Inglés UK, maduro
     voice: str = "es-MX-JorgeNeural"  # Mejor voz masculina madura español
+    
+    # Hugging Face TTS models (gratis, local, GPU opcional)
+    # Modelos recomendados para español:
+    # facebook/mms-tts-spa - MMS-TTS Spanish (buena calidad, multilingüe)
+    # facebook/mms-tts-eng - English
+    # microsoft/speecht5_tts - SpeechT5 (requiere speaker embeddings)
+    hf_model: str = "facebook/mms-tts-spa"  # Modelo HF para español
     
     # Voces alternativas para testing
     voice_alternatives: tuple = (
