@@ -8,8 +8,9 @@ from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 from pathlib import Path
 
-# Suppress deprecation warning for google.generativeai
+# Suppress deprecation warning for google.generativeai BEFORE importing
 warnings.filterwarnings("ignore", category=FutureWarning, module="google.generativeai")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="google.generativeai")
 
 # Try new google.genai first, fallback to deprecated google.generativeai
 try:

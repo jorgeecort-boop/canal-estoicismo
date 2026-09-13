@@ -96,9 +96,9 @@ class TTSSettings:
     gtts_lang: str = "es"
     gtts_tld: str = "com.mx"  # Español mexicano
 
-    # edge-tts CLI format (sin % para compatibilidad Windows)
-    edge_rate: str = "-15"
-    edge_volume: str = "+0"
+    # edge-tts CLI format (sin Hz para compatibilidad)
+    edge_rate: str = "-15%"
+    edge_volume: str = "+0%"
     edge_pitch: str = "-10Hz"
 
 

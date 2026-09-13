@@ -76,31 +76,26 @@ class TTSEngine:
         volume: Optional[str] = None,
         pitch: Optional[str] = None,
     ) -> float:
-        """Generate audio using edge-tts CLI (gratis, sin API key)."""
+        """Generate audio using edge-tts Python library (Communicate) - más confiable que CLI."""
+        try:
+            from edge_tts import Communicate
+        except ImportError:
+            raise RuntimeError("edge-tts not installed. Run: pip install edge-tts")
+
         voice = voice or self.tts_settings.voice
         rate = rate or self.tts_settings.edge_rate
         volume = volume or self.tts_settings.edge_volume
-        pitch = pitch or self.tts_settings.edge_pitch
+        # pitch sin "Hz" para edge-tts Python library
+        pitch = (pitch or self.tts_settings.edge_pitch).replace("Hz", "")
 
-        cmd = [
-            "edge-tts",
-            "--text", text,
-            "--voice", voice,
-            "--rate", rate,
-            "--volume", volume,
-            "--pitch", pitch,
-            "--write-media", str(output_path),
-        ]
-
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        communicate = Communicate(
+            text=text,
+            voice=voice,
+            rate=rate,
+            volume=volume,
+            pitch=pitch,
         )
-        stdout, stderr = await proc.communicate()
-
-        if proc.returncode != 0:
-            raise RuntimeError(f"edge-tts failed: {stderr.decode()}")
+        await communicate.save(str(output_path))
 
         return self._get_audio_duration(output_path)
 

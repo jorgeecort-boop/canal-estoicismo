@@ -57,9 +57,13 @@ class ProIntegrationTest:
         """Genera imagen usando SDXL Turbo con prompts cinematográficos mejorados."""
         try:
             import torch
-            from diffusers import DiffusionPipeline
+            # Check diffusers availability
+            try:
+                from diffusers import DiffusionPipeline
+            except ImportError as e:
+                print(f"   [WARN] Diffusers import failed: {e}")
+                return None
             from PIL import Image
-            from config.google_ai import GoogleAIService as GoogleAIConfig
 
             device = "cuda" if torch.cuda.is_available() else "cpu"
             print(f"   [INFO] Device: {device} | VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f}GB" if device == "cuda" else "   [INFO] Device: CPU")
@@ -69,12 +73,16 @@ class ProIntegrationTest:
                 return None
 
             # Cargar pipeline con optimizaciones de memoria
-            pipe = DiffusionPipeline.from_pretrained(
-                "stabilityai/sdxl-turbo",
-                torch_dtype=torch.float16,
-                variant="fp16",
-                use_safetensors=True,
-            ).to(device)
+            try:
+                pipe = DiffusionPipeline.from_pretrained(
+                    "stabilityai/sdxl-turbo",
+                    torch_dtype=torch.float16,
+                    variant="fp16",
+                    use_safetensors=True,
+                ).to(device)
+            except Exception as e:
+                print(f"   [WARN] Failed to load SDXL pipeline: {e}")
+                return None
 
             # Habilitar attention slicing para ahorrar VRAM
             pipe.enable_attention_slicing()
@@ -82,7 +90,6 @@ class ProIntegrationTest:
 
             # Prompt mejorado con estilo cinematográfico
             base_prompt = scene.image_prompt
-            # Use the enhance_image_prompt from google_ai service
             from src.services.google_ai import GoogleAIService
             enhanced = GoogleAIService().enhance_image_prompt(base_prompt, style)
 
@@ -92,7 +99,7 @@ class ProIntegrationTest:
             image = pipe(
                 prompt=enhanced,
                 negative_prompt=negative,
-                num_inference_steps=3,  # Un poco más de calidad que 2
+                num_inference_steps=3,
                 guidance_scale=0.0,
                 width=1024,
                 height=1024,
@@ -111,8 +118,9 @@ class ProIntegrationTest:
             
             return output_path
 
-        except ImportError:
-            print("   [INFO] Diffusers no instalado")
+        except ImportError as e:
+            print(f"   [WARN] Import error: {e}")
+            return None
         except Exception as e:
             print(f"   [ERROR] SDXL: {e}")
             import traceback
