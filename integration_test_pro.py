@@ -91,7 +91,9 @@ class ProIntegrationTest:
             # Prompt mejorado con estilo cinematográfico
             base_prompt = scene.image_prompt
             from src.services.google_ai import GoogleAIService
-            enhanced = GoogleAIService().enhance_image_prompt(base_prompt, style)
+            enhanced = GoogleAIService().enhance_image_prompt(
+                base_prompt, style, scene_num, len(scene_num) if hasattr(scene_num, '__len__') else 5
+            )
 
             negative = "bright, colorful, cartoon, anime, modern, text, watermark, signature, blurry, low quality, distorted, ugly, oversaturated, watermark, username, logo, watermark text"
 
@@ -157,12 +159,12 @@ class ProIntegrationTest:
 
         return None
 
-    async def generate_image(self, scene: Scene, scene_num: int) -> Path:
+    async def generate_image(self, scene: Scene, scene_num: int, total_scenes: int = 5) -> Path:
         """Genera imagen: SDXL (GPU) -> Pollinations -> Placeholder."""
-        print(f"\n[IMG] Generando imagen escena {scene_num}...")
+        print(f"\n[IMG] Generando imagen escena {scene_num}/{total_scenes}...")
 
         # 1. SDXL en GPU (mejor calidad)
-        result = await self.generate_images_sdxl(scene, scene_num)
+        result = await self.generate_images_sdxl(scene, scene_num, total_scenes)
         if result and result.exists():
             return result
 
@@ -264,8 +266,9 @@ class ProIntegrationTest:
 
         # 3. GENERAR IMÁGENES (SDXL en GPU)
         print("\n[3/5] GENERANDO IMÁGENES CINEMATOGRÁFICAS (SDXL Turbo)...")
+        total_scenes = len(story.scenes)
         for i, scene in enumerate(story.scenes, 1):
-            img_path = await self.generate_image(scene, i)
+            img_path = await self.generate_image(scene, i, total_scenes)
             scene.image_path = img_path
 
         # 4. ENSAMBLAR VIDEO (Alta calidad + transiciones)

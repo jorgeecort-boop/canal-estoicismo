@@ -120,25 +120,32 @@ class GoogleAIService:
 
         return None
 
-    def _build_story_prompt(self, theme: str, num_scenes: int, target_duration_min: float) -> str:
+def _build_story_prompt(self, theme: str, num_scenes: int, target_duration_min: float) -> str:
         return f"""
 Eres un experto en filosofía estoica y guionista de documentales. Genera una historia estoica para un video de YouTube de {target_duration_min} minutos, dividida en {num_scenes} escenas.
 
 TEMA: {theme}
 
 REQUISITOS:
-1. Estilo narrativo: Profundo, reflexivo, tono de narrador maduro y sabio
+1. Estilo narrativo: Profundo, reflexivo, tono de historiador/narrador maduro, voz grave y apacible
 2. Cada escena debe tener:
-   - text_overlay: Frase corta (máx 80 chars) para mostrar en pantalla
-   - voiceover_text: Narración completa (150-250 palabras por escena)
-   - image_prompt: Prompt detallado en INGLÉS para generación de imagen cinematográfica (estilo: estatua de mármol, arte clásico, iluminación dramática, niebla volumétrica, sombras, 8k, masterpiece)
+   - text_overlay: Frase corta (máx 80 chars) para mostrar en pantalla como subtítulo
+   - voiceover_text: Narración completa (150-250 palabras por escena), tono de historiador sabio
+   - image_prompt: Prompt detallado en INGLÉS para generación de imagen CINEMATOGRÁFICA ÚNICA por escena.
+     CADA ESCENA DEBE TENER UNA COMPOSICIÓN VISUAL DIFERENTE:
+     - Escena 1: Primer plano dramático (rostro, manos, objeto simbólico)
+     - Escena 2: Escena amplia (paisaje, arquitectura, atmósfera)
+     - Escena 3: Detalle artístico (bajo relieve, mosaico, manuscrito antiguo)
+     - Escena 4: Composición humana (filósofo pensando, escribiendo, caminando)
+     - Escena 5: Vista cósmica/filosófica (estrellas, horizonte, perspectiva aérea)
    - estimated_duration: Duración estimada en segundos
 
 3. Estructura narrativa:
-   - Escena 1: Gancho (hook) - presenta el problema/pregunta
-   - Escenas 2-3: Enseñanza central (filósofo + concepto)
-   - Escena 4: Aplicación práctica
-   - Escena 5: Reflexión final / cierre inspirador
+   - Escena 1: Gancho (hook) - presenta el problema/pregunta existencial
+   - Escena 2: Contexto histórico + enseñanza central del filósofo
+   - Escena 3: Profundización en el concepto + analogía visual
+   - Escena 4: Aplicación práctica en la vida moderna
+   - Escena 5: Reflexión final / cierre inspirador con apertura
 
 4. Filósofos según tema:
    - control_dichotomy: Epicteto
@@ -161,8 +168,8 @@ FORMATO DE SALIDA (JSON estricto):
     {{
       "scene_number": 1,
       "text_overlay": "Frase corta para pantalla",
-      "voiceover_text": "Narración completa detallada...",
-      "image_prompt": "Detailed cinematic prompt in English...",
+      "voiceover_text": "Narración completa detallada, tono historiador sabio...",
+      "image_prompt": "Detailed UNIQUE cinematic prompt in English for THIS specific scene...",
       "estimated_duration": 45.0
     }}
   ],
@@ -170,35 +177,58 @@ FORMATO DE SALIDA (JSON estricto):
 }}
 
 IMPORTANTE:
-- voiceover_text debe ser texto fluido para TTS (sin saltos de línea, puntuación natural)
-- image_prompt en INGLÉS, muy descriptivo, estilo cinematográfico estoico
+- voiceover_text: Texto fluido para TTS, tono historiador sabio, voz grave y apacible
+- image_prompt en INGLÉS, ÚNICO por escena, muy descriptivo, composición cinematográfica VARIADA
 - total_estimated_duration = suma de estimated_duration de todas las escenas
 - Sin texto adicional, solo JSON válido
 """
 
-    def enhance_image_prompt(self, base_prompt: str, style: str = "cinematic_stoic") -> str:
-        """Enhance image prompt with cinematic stoic style."""
-        styles = {
-            "cinematic_stoic": (
-                "cinematic stoic aesthetic, ancient Greek/Roman philosophy visualization, "
-                "marble statue, classical art, dramatic chiaroscuro lighting, "
-                "volumetric fog, atmospheric mist, deep shadows, golden hour light rays, "
-                "weathered stone textures, timeless atmosphere, 8k resolution, masterpiece, "
-                "highly detailed, photorealistic, Unreal Engine 5 render style"
-            ),
-            "dark_moody": (
-                "dark moody atmosphere, low key lighting, mysterious shadows, "
-                "ancient ruins, stone textures, philosophical symbols, "
-                "cinematic composition, rule of thirds, 8k"
-            ),
-            "ethereal": (
-                "ethereal divine light, transcendent atmosphere, cosmic perspective, "
-                "stars and galaxies, philosophical enlightenment visualization, "
-                "soft glow, heavenly rays, 8k masterpiece"
-            ),
+    def enhance_image_prompt(self, base_prompt: str, style: str = "cinematic_stoic", scene_number: int = 1, total_scenes: int = 5) -> str:
+        """Enhance image prompt with cinematic stoic style - VARIED per scene."""
+        # Base cinematic style
+        base_style = (
+            "cinematic stoic aesthetic, ancient Greek/Roman philosophy visualization, "
+            "dramatic chiaroscuro lighting, volumetric fog, atmospheric mist, "
+            "deep shadows, golden hour light rays, weathered stone textures, "
+            "timeless atmosphere, 8k resolution, masterpiece, highly detailed, "
+            "photorealistic, cinematic composition"
+        )
+        
+        # Scene-specific visual variety
+        scene_styles = {
+            1: "extreme close-up, macro photography, weathered marble face of philosopher, "
+               "deep wrinkles showing wisdom, intense eyes, dramatic side lighting, "
+               "shallow depth of field, dust motes in light rays",
+            2: "wide cinematic shot, ancient Roman forum at golden hour, "
+               "marble columns, atmospheric perspective, volumetric light shafts, "
+               "small human figure for scale, epic scale, majestic atmosphere",
+            3: "medium shot, ancient manuscript on wooden desk, quill pen, "
+               "candlelight flickering, wax seal, illuminated manuscript details, "
+               "warm amber tones, intimate scholarly atmosphere, depth of field",
+            4: "philosophical figure walking through olive grove at sunset, "
+               "Marcus Aurelius or Seneca from behind, contemplative posture, "
+               "long shadows, golden light through leaves, cinematic backlighting, "
+               "solitary thinker, stoic posture, timeless wisdom",
+            5: "cosmic perspective, aerial view from above, "
+               "Earth from space at twilight, stars emerging, "
+               "pale blue dot, overview effect, philosophical transcendence, "
+               "vast universe, tiny human concerns, infinite perspective, awe-inspiring",
         }
-        enhancement = styles.get(style, styles["cinematic_stoic"])
-        return f"{base_prompt}, {enhancement}"
+        
+        # Get scene-specific style or default
+        scene_style = scene_styles.get(scene_number, scene_styles[1])
+        
+        # Style variations
+        style_variations = {
+            "cinematic_stoic": base_style,
+            "dark_moody": "dark moody atmosphere, low key lighting, mysterious shadows, ancient ruins",
+            "ethereal": "ethereal divine light, transcendent atmosphere, cosmic perspective, stars and galaxies",
+        }
+        
+        enhancement = style_variations.get(style, base_style)
+        scene_specific = scene_style
+        
+        return f"{base_prompt}, {enhancement}, {scene_specific}, {style} composition"
 
 
 def create_story_from_gemini(gemini_data: StoicStoryData) -> Story:
