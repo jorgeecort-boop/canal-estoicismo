@@ -98,7 +98,31 @@ class TTSEngine:
         )
         await communicate.save(str(output_path))
 
+        # Normalize loudness with FFmpeg loudnorm (EBU R128 standard)
+        self._normalize_audio(output_path)
+
         return self._get_audio_duration(output_path)
+
+    def _normalize_audio(self, audio_path: Path) -> None:
+        """Normalize audio loudness to -16 LUFS (YouTube standard) using FFmpeg loudnorm."""
+        try:
+            tmp_path = audio_path.with_suffix(".norm.mp3")
+            cmd = [
+                "ffmpeg", "-y", "-i", str(audio_path),
+                "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
+                "-ar", "44100",
+                "-ab", "192k",
+                str(tmp_path),
+            ]
+            result = subprocess.run(cmd, capture_output=True, timeout=30)
+            if result.returncode == 0 and tmp_path.exists() and tmp_path.stat().st_size > 0:
+                tmp_path.replace(audio_path)
+            else:
+                tmp_path.unlink(missing_ok=True)
+        except Exception as e:
+            # loudnorm is optional — don't crash if FFmpeg is missing
+            print(f"   [WARN] loudnorm skipped: {e}")
+
 
     def _generate_gtts(
         self,

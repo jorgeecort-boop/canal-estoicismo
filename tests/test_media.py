@@ -1,13 +1,23 @@
-"""Tests for media/image_manager module."""
+"""Tests for media/image_manager module — updated for MediaManager."""
 
+import asyncio
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, PropertyMock
+from io import BytesIO
 
 import pytest
+from PIL import Image
 
 from src.media import ImageManager, ImageAsset, get_image_manager
 from config import get_settings, reset_settings
+
+
+def _make_valid_jpeg_bytes(width=4, height=4) -> bytes:
+    """Return minimal valid JPEG bytes using PIL."""
+    buf = BytesIO()
+    Image.new("RGB", (width, height), color=(30, 30, 60)).save(buf, format="JPEG")
+    return buf.getvalue()
 
 
 class TestImageAsset:
@@ -31,22 +41,19 @@ class TestImageAsset:
             height=1080,
         )
         d = asset.to_dict()
-        assert d["path"] == "/tmp/img.jpg" or d["path"] == "\\tmp\\img.jpg"
+        assert "/tmp/img.jpg" in d["path"] or "\\tmp\\img.jpg" in d["path"]
         assert d["source"] == "cache"
 
 
-class TestImageManager:
+class TestMediaManager:
     @pytest.fixture
     def settings(self):
         reset_settings()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             settings = get_settings(root)
-            # Create local assets dir with test images
             assets_dir = settings.paths.assets_dir / "images"
             assets_dir.mkdir(parents=True, exist_ok=True)
-            (assets_dir / "test1.jpg").write_bytes(b"fake")
-            (assets_dir / "test2.png").write_bytes(b"fake")
             yield settings
         reset_settings()
 
@@ -55,101 +62,149 @@ class TestImageManager:
         return ImageManager(settings)
 
     def test_manager_initialization(self, manager):
-        assert manager.image_settings.provider == "local_assets"
         assert manager._assets_dir.exists()
 
-    def test_get_cache_key(self, manager):
-        key1 = manager._get_cache_key("Prompt one")
-        key2 = manager._get_cache_key("Prompt one")
-        key3 = manager._get_cache_key("Prompt two")
-
-        assert key1 == key2
-        assert key1 != key3
-        assert len(key1) == 16
+    def test_get_cache_key_deterministic(self, manager):
+        k1 = manager._get_cache_key("Prompt one")
+        k2 = manager._get_cache_key("Prompt one")
+        k3 = manager._get_cache_key("Prompt two")
+        assert k1 == k2
+        assert k1 != k3
+        assert len(k1) == 16
 
     def test_get_cached_path(self, manager):
         path = manager._get_cached_path("abc123")
         assert path.name == "abc123.jpg"
         assert path.parent == manager._assets_dir
 
-    def test_get_local_asset_found(self, manager):
-        # The local_assets_path is a relative path "assets/images" by default
-        # which won't have files in the test temp dir, so just test it runs
-        path = manager.get_local_asset("Any prompt")
-        # Could be None if no local assets found, that's OK
-        assert path is None or isinstance(path, Path)
+    # ── _verify_image ────────────────────────────────────────────────
+    def test_verify_image_missing(self, manager):
+        assert manager._verify_image(Path("/nonexistent/path.jpg")) is False
 
-    def test_get_local_asset_not_found(self, manager):
-        # Remove all assets
-        for f in manager._assets_dir.glob("*"):
-            f.unlink()
+    def test_verify_image_zero_bytes(self, manager, tmp_path):
+        zero = tmp_path / "zero.jpg"
+        zero.write_bytes(b"")
+        assert manager._verify_image(zero) is False
 
-        path = manager.get_local_asset("Prompt")
-        assert path is None
+    def test_verify_image_corrupt(self, manager, tmp_path):
+        bad = tmp_path / "bad.jpg"
+        bad.write_bytes(b"not an image at all")
+        assert manager._verify_image(bad) is False
 
+    def test_verify_image_valid(self, manager, tmp_path):
+        good = tmp_path / "good.jpg"
+        good.write_bytes(_make_valid_jpeg_bytes())
+        assert manager._verify_image(good) is True
+
+    # ── clean_legacy_caches ──────────────────────────────────────────
+    def test_clean_legacy_caches_removes_zero_byte(self, manager):
+        bad = manager._assets_dir / "corrupt.jpg"
+        bad.write_bytes(b"")
+        manager.clean_legacy_caches()
+        assert not bad.exists()
+
+    def test_clean_legacy_caches_keeps_valid(self, manager):
+        good = manager._assets_dir / "good.jpg"
+        good.write_bytes(_make_valid_jpeg_bytes())
+        manager.clean_legacy_caches()
+        assert good.exists()
+
+    # ── Pollinations mock: success ────────────────────────────────────
     @patch("src.media.image_manager.requests.get")
-    def test_download_image_success(self, mock_get, manager):
+    def test_generate_pollinations_success(self, mock_get, manager):
         mock_response = MagicMock()
-        mock_response.raise_for_status.return_value = None
-        mock_response.iter_content.return_value = [b"chunk1", b"chunk2"]
+        mock_response.status_code = 200
+        mock_response.iter_content.return_value = [_make_valid_jpeg_bytes()]
+        mock_response.content = _make_valid_jpeg_bytes()
         mock_get.return_value = mock_response
 
-        path = manager.download_image("https://example.com/img.jpg", "Test prompt")
-        assert path is not None
-        assert path.exists()
-        assert path.read_bytes() == b"chunk1chunk2"
-
-    @patch("src.media.image_manager.requests.get")
-    def test_download_image_failure(self, mock_get, manager):
-        mock_get.side_effect = Exception("Network error")
-
-        path = manager.download_image("https://example.com/img.jpg", "Test prompt")
-        assert path is None
-
-    def test_get_image_for_prompt_cached(self, manager):
-        # Create cached file
-        cache_key = manager._get_cache_key("Cached prompt")
-        cached_path = manager._get_cached_path(cache_key)
-        cached_path.write_bytes(b"cached image")
-
-        asset = manager.get_image_for_prompt("Cached prompt")
+        asset = manager._generate_pollinations("stoic philosopher", scene_id=1)
         assert asset is not None
-        assert asset.path == cached_path
-        assert asset.source == "cache"
-
-    def test_get_image_for_prompt_local(self, manager):
-        # Remove cache to force fallback lookup
-        for f in manager._assets_dir.glob("*.jpg"):
-            if f.name.startswith("abc"):  # cache files
-                f.unlink()
-
-        asset = manager.get_image_for_prompt("Local prompt", provider="local")
-        assert asset is not None
-        # Falls back to placeholder when no local assets found
-        assert asset.source in ["local", "placeholder"]
+        assert asset.source == "pollinations"
         assert asset.path.exists()
 
-    def test_get_image_for_prompt_placeholder(self, manager):
-        # No cache, no local assets
-        for f in manager._assets_dir.glob("*"):
-            f.unlink()
+    # ── Pollinations mock: timeout / network failure ──────────────────
+    @patch("src.media.image_manager.requests.get")
+    def test_generate_pollinations_timeout_returns_none(self, mock_get, manager):
+        """Pollinations timeout should return None (not raise), triggering fallback."""
+        import requests as req
+        mock_get.side_effect = req.exceptions.Timeout("timed out")
 
-        asset = manager.get_image_for_prompt("Test prompt", provider="local")
-        assert asset is not None
+        asset = manager._generate_pollinations("any prompt", scene_id=1)
+        assert asset is None
+
+    # ── Placeholder fallback ─────────────────────────────────────────
+    def test_create_placeholder_creates_valid_image(self, manager):
+        asset = manager._create_placeholder("Test scene", scene_id=3)
         assert asset.source == "placeholder"
+        assert asset.path.exists()
+        assert asset.path.stat().st_size > 0
+        assert manager._verify_image(asset.path)
 
-    def test_fetch_images_for_story(self, manager):
+    # ── get_image_for_prompt: uses valid cache, skips Pollinations ────
+    @patch("src.media.image_manager.requests.get")
+    def test_get_image_uses_valid_cache(self, mock_get, manager):
+        cache_key = manager._get_cache_key("Cached prompt")
+        cached_path = manager._get_cached_path(cache_key)
+        cached_path.write_bytes(_make_valid_jpeg_bytes())
+
+        asset = manager.get_image_for_prompt("Cached prompt", scene_id=1)
+        assert asset.source == "cache"
+        mock_get.assert_not_called()
+
+    # ── get_image_for_prompt: corrupted cache forces Pollinations ─────
+    @patch("src.media.image_manager.requests.get")
+    def test_get_image_invalidates_corrupt_cache(self, mock_get, manager):
+        cache_key = manager._get_cache_key("Bad cached prompt")
+        cached_path = manager._get_cached_path(cache_key)
+        cached_path.write_bytes(b"corrupt")
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = _make_valid_jpeg_bytes()
+        mock_response.iter_content.return_value = [_make_valid_jpeg_bytes()]
+        mock_get.return_value = mock_response
+
+        asset = manager.get_image_for_prompt("Bad cached prompt", scene_id=2)
+        # Pollinations should have been called after cache was purged
+        mock_get.assert_called_once()
+        assert asset is not None
+
+    # ── fetch_images_for_story (sequential) ──────────────────────────
+    @patch("src.media.image_manager.requests.get")
+    def test_fetch_images_for_story(self, mock_get, manager):
         from src.narrative import Story, Scene
 
-        scenes = [
-            Scene(1, "O1", "V1", "Prompt 1"),
-            Scene(2, "O2", "V2", "Prompt 2"),
-        ]
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = _make_valid_jpeg_bytes()
+        mock_response.iter_content.return_value = [_make_valid_jpeg_bytes()]
+        mock_get.return_value = mock_response
+
+        scenes = [Scene(1, "O1", "V1", "Prompt 1"), Scene(2, "O2", "V2", "Prompt 2")]
         story = Story("theme", "Title", "Phil", scenes)
 
         assets = manager.fetch_images_for_story(story)
-
         assert len(assets) == 2
+        for scene in story.scenes:
+            assert scene.image_path is not None
+
+    # ── fetch_images_for_story_async ─────────────────────────────────
+    @patch("src.media.image_manager.requests.get")
+    def test_fetch_images_async(self, mock_get, manager):
+        from src.narrative import Story, Scene
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = _make_valid_jpeg_bytes()
+        mock_response.iter_content.return_value = [_make_valid_jpeg_bytes()]
+        mock_get.return_value = mock_response
+
+        scenes = [Scene(i, f"O{i}", f"V{i}", f"Prompt {i}") for i in range(1, 4)]
+        story = Story("theme", "Title", "Phil", scenes)
+
+        assets = asyncio.run(manager.fetch_images_for_story_async(story, max_concurrent=2))
+        assert len(assets) == 3
         for scene in story.scenes:
             assert scene.image_path is not None
 

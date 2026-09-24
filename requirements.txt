@@ -1,7 +1,8 @@
-# Core dependencies
+# Core dependencies - pinned for reproducibility
 edge-tts>=6.1.0
 gtts>=2.5.0
-moviepy>=1.0.3
+moviepy>=2.0.0
+numpy>=1.24.0
 
 # Image processing
 Pillow>=10.0.0

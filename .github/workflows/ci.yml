@@ -2,13 +2,12 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [main, develop]
+    branches: [master, develop]
   pull_request:
-    branches: [main, develop]
+    branches: [master, develop]
 
 env:
   PYTHON_VERSION: "3.11"
-  POETRY_VERSION: "1.7.0"
 
 jobs:
   lint-and-typecheck:
@@ -55,7 +54,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg imagemagick
+          sudo apt-get install -y ffmpeg fonts-dejavu-core fonts-dejavu-extra
 
       - name: Install Python dependencies
         run: |
@@ -63,9 +62,15 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-asyncio pytest-cov
 
-      - name: Run unit tests
+      - name: Run unit tests with coverage
         run: |
-          pytest tests/ -v --tb=short --cov=src --cov=config --cov-report=term-missing --cov-report=xml
+          pytest tests/ -v --tb=short \
+            --cov=src --cov=config \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-fail-under=60
+        env:
+          PYTHONPATH: .
 
       - name: Upload coverage
         uses: codecov/codecov-action@v3
