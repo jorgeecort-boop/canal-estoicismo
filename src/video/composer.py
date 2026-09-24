@@ -294,7 +294,7 @@ class VideoComposer:
             # Write output
             video.write_videofile(
                 str(output_path),
-                fps=fps,
+                fps=self.video_settings.fps,
                 codec=self.video_settings.codec,
                 bitrate=self.video_settings.bitrate,
                 audio_codec=self.video_settings.audio_codec,
