@@ -246,13 +246,47 @@ class MediaManager:
         return self._create_placeholder(prompt, scene_id)
 
     def fetch_images_for_story(self, story) -> list[ImageAsset]:
-        """Fetch images for all scenes in a story."""
+        """Fetch images for all scenes in a story (sequential)."""
         assets = []
         for scene in story.scenes:
             asset = self.get_image_for_prompt(scene.image_prompt, scene_id=scene.scene_number)
             if asset:
                 scene.image_path = asset.path
                 assets.append(asset)
+        return assets
+
+    async def fetch_images_for_story_async(self, story, max_concurrent: int = 3) -> list[ImageAsset]:
+        """Fetch images for all scenes concurrently with Semaphore throttle."""
+        import asyncio
+        semaphore = asyncio.Semaphore(max_concurrent)
+        loop = asyncio.get_event_loop()
+
+        # Pre-clean cache once before parallel run
+        self.clean_legacy_caches()
+
+        async def _fetch_one(scene) -> ImageAsset:
+            async with semaphore:
+                # Run blocking I/O in thread pool so it doesn't block the event loop
+                asset = await loop.run_in_executor(
+                    None,
+                    lambda: self.get_image_for_prompt(
+                        scene.image_prompt,
+                        scene_id=scene.scene_number,
+                    ),
+                )
+                scene.image_path = asset.path
+                return asset
+
+        tasks = [_fetch_one(scene) for scene in story.scenes]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        assets = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                print(f"   [ERROR] Image scene {i+1} failed: {result}")
+            else:
+                assets.append(result)
+
         return assets
 
 

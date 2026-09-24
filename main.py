@@ -81,22 +81,21 @@ async def generate_video(args, settings) -> Path:
     )
     print(f"   [OK] Story generated: {story.title} ({len(story.scenes)} scenes, ~{story.total_estimated_duration:.1f}s)")
 
-    # 2. Generate audio
-    print("\n[TTS] Generating voiceovers...")
+    # 2. Generate audio + fetch images IN PARALLEL
+    print("\n[TTS+IMG] Generating voiceovers and fetching images in parallel...")
     tts_engine = TTSEngine(settings)
+    img_manager = ImageManager(settings)
 
     def audio_progress(current, total, scene_num):
         if scene_num:
-            print(f"   Scene {scene_num}/{total}...", end="\r")
+            print(f"   [TTS] Scene {scene_num}/{total}...", end="\r")
 
-    await tts_engine.generate_for_story(story, progress_callback=audio_progress)
-    print(f"   [OK] Audio generated for {len(story.scenes)} scenes")
-
-    # 3. Fetch images
-    print("\n[IMG] Fetching images...")
-    img_manager = ImageManager(settings)
-    img_manager.fetch_images_for_story(story)
-    print(f"   [OK] Images ready for {len(story.scenes)} scenes")
+    # Run TTS and image downloads concurrently with asyncio.gather
+    await asyncio.gather(
+        tts_engine.generate_for_story(story, progress_callback=audio_progress),
+        img_manager.fetch_images_for_story_async(story, max_concurrent=3),
+    )
+    print(f"   [OK] Audio + Images ready for {len(story.scenes)} scenes")
 
     # 4. Compose video
     print("\n[VID] Composing video...")
