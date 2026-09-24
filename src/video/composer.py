@@ -220,13 +220,11 @@ class VideoComposer:
             if direction == "random":
                 direction = random.choice(["zoom_in", "zoom_out", "pan_left", "pan_right"])
 
-            fps = self.video_settings.fps
-            total_frames = int(scene_duration * fps)
-
-            # Pre-compute all frames for Ken Burns effect
-            frames = []
-            for frame_idx in range(total_frames):
-                progress = frame_idx / max(1, total_frames - 1)
+            # Create video clip from frames using VideoClip with lazy make_frame function
+            def make_frame(t):
+                # Calculate progress (0.0 to 1.0)
+                progress = t / max(0.001, scene_duration)
+                progress = min(1.0, max(0.0, progress))
                 
                 # Calculate zoom and position based on direction
                 if direction == "zoom_in":
@@ -257,12 +255,7 @@ class VideoComposer:
                 cropped = img.crop((left, top, left + crop_w, top + crop_h))
                 resized = cropped.resize((target_w, target_h), Image.LANCZOS)
                 
-                frames.append(np.array(resized))
-
-            # Create video clip from frames using VideoClip with make_frame function
-            def make_frame(t):
-                frame_idx = min(int(t * self.video_settings.fps), total_frames - 1)
-                return frames[frame_idx]
+                return np.array(resized)
             
             clip = VideoClip(make_frame, duration=scene_duration)
             clip.fps = self.video_settings.fps
