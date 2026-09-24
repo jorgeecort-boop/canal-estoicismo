@@ -203,7 +203,7 @@ class Settings:
     @classmethod
     def load(cls, project_root: Path | None = None, debug: bool = False, draft_mode: bool = False) -> "Settings":
         if project_root is None:
-            project_root = Path(__file__).parent.parent.parent
+            project_root = Path(__file__).parent.parent
 
         paths = PathSettings.from_root(project_root)
         paths.ensure_dirs()

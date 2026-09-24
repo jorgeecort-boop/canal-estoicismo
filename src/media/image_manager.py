@@ -94,6 +94,30 @@ class ImageManager:
             print(f"Failed to download image: {e}")
             return None
 
+    def _generate_pollinations(self, prompt: str) -> Optional[ImageAsset]:
+        import urllib.parse
+        enhanced = f"{prompt}, cinematic stoic aesthetic, marble statue, classical art, dark moody lighting, volumetric fog, dramatic shadows, 8k, masterpiece"
+        encoded = urllib.parse.quote(enhanced)
+        width, height = self.image_settings.width, self.image_settings.height
+        url = f"https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height}&nologo=true&private=true&enhance=true"
+        
+        try:
+            response = requests.get(url, timeout=60)
+            if response.status_code == 200:
+                cache_key = self._get_cache_key(prompt)
+                output_path = self._get_cached_path(cache_key)
+                output_path.write_bytes(response.content)
+                return ImageAsset(
+                    path=output_path,
+                    prompt=prompt,
+                    source="pollinations",
+                    width=width,
+                    height=height,
+                )
+        except Exception as e:
+            print(f"Pollinations error: {e}")
+        return None
+
     def get_image_for_prompt(
         self,
         prompt: str,
@@ -126,9 +150,14 @@ class ImageManager:
                     height=self.image_settings.height,
                 )
 
+        print("   [INFO] Generando imagen real con Pollinations AI...")
+        pollinations_asset = self._generate_pollinations(prompt)
+        if pollinations_asset:
+            return pollinations_asset
+
         # For other providers, return None (would need API keys)
         # In production, implement actual API calls here
-        print(f"Image provider '{provider}' not fully implemented. Using placeholder.")
+        print(f"Image provider '{provider}' no fully implemented or Pollinations failed. Using placeholder.")
         return self._create_placeholder(prompt)
 
     def _create_placeholder(self, prompt: str) -> ImageAsset:
@@ -152,7 +181,11 @@ class ImageManager:
             subprocess.run(cmd, check=True, capture_output=True)
         except Exception:
             # Fallback: create minimal file
-            output_path.write_bytes(b"")
+            try:
+                from PIL import Image
+                Image.new('RGB', (self.image_settings.width, self.image_settings.height), color='#1a1a2e').save(output_path, "JPEG")
+            except:
+                output_path.write_bytes(b"")
 
         return ImageAsset(
             path=output_path,

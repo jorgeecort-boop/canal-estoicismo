@@ -85,7 +85,7 @@ async def generate_video(args, settings) -> Path:
     print("\n[TTS] Generating voiceovers...")
     tts_engine = TTSEngine(settings)
 
-    async def audio_progress(current, total, scene_num):
+    def audio_progress(current, total, scene_num):
         if scene_num:
             print(f"   Scene {scene_num}/{total}...", end="\r")
 

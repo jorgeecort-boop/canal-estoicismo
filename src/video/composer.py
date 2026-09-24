@@ -195,13 +195,15 @@ class VideoComposer:
                                   output_path: Path, scene_duration: float, scene_number: int) -> bool:
         """Apply Ken Burns effect and text overlay using MoviePy (v2.x)."""
         try:
-            # MoviePy 2.x imports
-            from moviepy import ImageClip, AudioFileClip, CompositeVideoClip, concatenate_videoclips, VideoFileClip, VideoClip
-            # TextClip can be in different locations depending on version
+            # MoviePy imports fix
             try:
-                from moviepy import TextClip
+                from moviepy import VideoClip, ImageClip, TextClip, CompositeVideoClip, concatenate_videoclips, VideoFileClip, AudioFileClip
             except ImportError:
-                from moviepy.video.TextClip import TextClip
+                from moviepy.video.VideoClip import VideoClip, ImageClip, TextClip
+                from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
+                from moviepy.video.compositing.concatenate import concatenate_videoclips
+                from moviepy.video.io.VideoFileClip import VideoFileClip
+                from moviepy.audio.io.AudioFileClip import AudioFileClip
             from PIL import Image, ImageDraw, ImageFont
             import numpy as np
             import random
@@ -445,7 +447,8 @@ class VideoComposer:
                 from moviepy import VideoFileClip, concatenate_videoclips, CompositeVideoClip
             except ImportError:
                 from moviepy.video.io.VideoFileClip import VideoFileClip
-                from moviepy.video.CompositeVideoClip import concatenate_videoclips, CompositeVideoClip
+                from moviepy.video.compositing.concatenate import concatenate_videoclips
+                from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
             
             clips = [VideoFileClip(str(p)) for p in scene_paths]
             

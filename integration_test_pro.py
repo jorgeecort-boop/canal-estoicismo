@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from src.narrative import Scene, Story
 from src.audio import TTSEngine
-from src.media import ImageManager
+from src.media.lightweight_image_generator import LightweightImageGenerator
 from src.video import VideoComposer
 from src.services.google_ai import GoogleAIService, create_story_from_gemini
 from config import get_settings
@@ -45,7 +45,6 @@ class ProIntegrationTest:
         # Inicializar módulos
         self.story_gen = None
         self.tts_engine = TTSEngine(self.settings)
-        self.img_manager = ImageManager(self.settings)
         self.composer = VideoComposer(self.settings)
         
         # Google AI Service
@@ -53,132 +52,29 @@ class ProIntegrationTest:
         if use_gemini:
             self.google_ai = GoogleAIService()
 
-    async def generate_images_sdxl(self, scene: Scene, scene_num: int, style: str = "cinematic_stoic") -> Optional[Path]:
-        """Genera imagen usando SDXL Turbo con prompts cinematográficos mejorados."""
+        # Lightweight image generator (Pollinations/Flux - zero VRAM)
+        self.image_gen = LightweightImageGenerator(str(self.settings.paths.assets_dir / "images"))
+
+    async def generate_scene_image(self, scene: Scene, scene_num: int, total_scenes: int = 5) -> Path:
+        """Generate image via Pollinations/Flux (zero VRAM, fast, free)."""
+        print(f"\n[IMG] Generating scene {scene_num}/{total_scenes} via Flux...")
+        
         try:
-            import torch
-            # Check diffusers availability
-            try:
-                from diffusers import DiffusionPipeline
-            except ImportError as e:
-                print(f"   [WARN] Diffusers import failed: {e}")
-                return None
-            from PIL import Image
-
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            print(f"   [INFO] Device: {device} | VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f}GB" if device == "cuda" else "   [INFO] Device: CPU")
-
-            if device == "cpu":
-                print("   [WARN] Sin GPU, saltando SDXL")
-                return None
-
-            # Cargar pipeline con optimizaciones de memoria
-            try:
-                pipe = DiffusionPipeline.from_pretrained(
-                    "stabilityai/sdxl-turbo",
-                    torch_dtype=torch.float16,
-                    variant="fp16",
-                    use_safetensors=True,
-                ).to(device)
-            except Exception as e:
-                print(f"   [WARN] Failed to load SDXL pipeline: {e}")
-                return None
-
-            # Habilitar attention slicing para ahorrar VRAM
-            pipe.enable_attention_slicing()
-            pipe.enable_vae_slicing()
-
-            # Prompt mejorado con estilo cinematográfico
-            base_prompt = scene.image_prompt
-            from src.services.google_ai import GoogleAIService
-            enhanced = GoogleAIService().enhance_image_prompt(
-                base_prompt, style, scene_num, len(scene_num) if hasattr(scene_num, '__len__') else 5
+            # Use scene-specific style for visual variety
+            img_path = self.image_gen.generate_scene_image(
+                prompt=scene.image_prompt,
+                scene_id=scene_num,
+                style="cinematic_stoic"
             )
-
-            negative = "bright, colorful, cartoon, anime, modern, text, watermark, signature, blurry, low quality, distorted, ugly, oversaturated, watermark, username, logo, watermark text"
-
-            # SDXL Turbo: 2-4 steps, guidance_scale=0
-            image = pipe(
-                prompt=enhanced,
-                negative_prompt=negative,
-                num_inference_steps=3,
-                guidance_scale=0.0,
-                width=1024,
-                height=1024,
-            ).images[0]
-
-            # Upscale a 1920x1080 con LANCZOS
-            image = image.resize((1920, 1080), Image.LANCZOS)
-
-            output_path = self.settings.paths.temp_dir / f"scene_{scene_num:03d}_sdxl.jpg"
-            image.save(output_path, quality=95, optimize=True)
-            print(f"   [OK] Imagen SDXL generada: {output_path.name} ({output_path.stat().st_size/1024:.1f} KB)")
+            print(f"   [OK] Scene {scene_num} generated: {Path(img_path).name}")
+            return Path(img_path)
             
-            # Liberar memoria
-            del pipe
-            torch.cuda.empty_cache()
-            
-            return output_path
-
-        except ImportError as e:
-            print(f"   [WARN] Import error: {e}")
-            return None
         except Exception as e:
-            print(f"   [ERROR] SDXL: {e}")
-            import traceback
-            traceback.print_exc()
-
-        return None
-
-    async def generate_images_pollinations(self, scene: Scene, scene_num: int) -> Optional[Path]:
-        """Genera imagen usando Pollinations AI (gratuito, sin key)."""
-        import aiohttp
-        import urllib.parse
-
-        prompt = scene.image_prompt
-        enhanced = f"{prompt}, cinematic stoic aesthetic, marble statue, classical art, dark moody lighting, volumetric fog, dramatic shadows, 8k, masterpiece"
-        encoded = urllib.parse.quote(enhanced)
-
-        width, height = self.settings.video.width, self.settings.video.height
-        url = f"https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height}&nologo=true&private=true&enhance=true"
-
-        output_path = self.settings.paths.temp_dir / f"scene_{scene_num:03d}_pollinations.jpg"
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
-                    if resp.status == 200:
-                        data = await resp.read()
-                        output_path.write_bytes(data)
-                        print(f"   [OK] Pollinations: {output_path.name} ({len(data)/1024:.1f} KB)")
-                        return output_path
-                    else:
-                        print(f"   [WARN] Pollinations HTTP {resp.status}")
-        except Exception as e:
-            print(f"   [ERROR] Pollinations: {e}")
-
-        return None
-
-    async def generate_image(self, scene: Scene, scene_num: int, total_scenes: int = 5) -> Path:
-        """Genera imagen: SDXL (GPU) -> Pollinations -> Placeholder."""
-        print(f"\n[IMG] Generando imagen escena {scene_num}/{total_scenes}...")
-
-        # 1. SDXL en GPU (mejor calidad)
-        result = await self.generate_images_sdxl(scene, scene_num, total_scenes)
-        if result and result.exists():
-            return result
-
-        # 2. Pollinations
-        print("   [INFO] SDXL no disponible, intentando Pollinations...")
-        result = await self.generate_images_pollinations(scene, scene_num)
-        if result and result.exists():
-            return result
-
-        # 3. Placeholder
-        print("   [WARN] Usando placeholder local")
-        placeholder = self.settings.paths.temp_dir / f"scene_{scene_num:03d}_placeholder.jpg"
-        self._create_placeholder(placeholder, scene_num)
-        return placeholder
+            print(f"   [ERROR] Flux generation failed for scene {scene_num}: {e}")
+            # Fallback to placeholder
+            placeholder = self.settings.paths.temp_dir / f"scene_{scene_num:03d}_placeholder.jpg"
+            self._create_placeholder(placeholder, scene_num)
+            return placeholder
 
     def _create_placeholder(self, path: Path, scene_num: int):
         """Crea imagen placeholder con gradiente y texto."""
@@ -268,7 +164,7 @@ class ProIntegrationTest:
         print("\n[3/5] GENERANDO IMÁGENES CINEMATOGRÁFICAS (SDXL Turbo)...")
         total_scenes = len(story.scenes)
         for i, scene in enumerate(story.scenes, 1):
-            img_path = await self.generate_image(scene, i, total_scenes)
+            img_path = await self.generate_scene_image(scene, i, total_scenes)
             scene.image_path = img_path
 
         # 4. ENSAMBLAR VIDEO (Alta calidad + transiciones)
