@@ -67,7 +67,7 @@ class KenBurnsSettings:
 @dataclass(frozen=True)
 class TTSSettings:
     """Text-to-Speech configuration - Solo opciones GRATIS sin facturación."""
-    provider: Literal["gtts", "edge-tts", "hf"] = "edge-tts"
+    provider: Literal["gtts", "edge-tts", "hf", "hf-gpu"] = "edge-tts"
     
     # Edge-TTS voices (gratis, sin API key, alta calidad)
     # Voces masculinas maduras recomendadas:
@@ -84,6 +84,11 @@ class TTSSettings:
     # facebook/mms-tts-eng - English
     # microsoft/speecht5_tts - SpeechT5 (requiere speaker embeddings)
     hf_model: str = "facebook/mms-tts-spa"  # Modelo HF para español
+    # Optional GPU provider. It is deliberately opt-in because it adds large
+    # model dependencies and requires a CUDA runtime.
+    hf_gpu_model: str = "hexgrad/Kokoro-82M"
+    hf_gpu_voice: str = "es_male"
+    hf_gpu_lang: str = "es"
     
     # Voces alternativas para testing
     voice_alternatives: tuple = (
@@ -125,6 +130,16 @@ class ImageSettings:
     local_assets_path: Path = Path("assets/images")
     width: int = 1920
     height: int = 1080
+
+
+@dataclass(frozen=True)
+class CineSettings:
+    """Optional cinematic post-processing. Disabled by default."""
+    enabled: bool = False
+    saturation: float = 1.1
+    contrast: float = 1.05
+    vignette: float = 0.25
+    grain: int = 6
 
 
 @dataclass(frozen=True)
@@ -195,6 +210,7 @@ class Settings:
     kenburns: KenBurnsSettings
     tts: TTSSettings
     image: ImageSettings
+    cine: CineSettings
     narrative: NarrativeSettings
     paths: PathSettings
     debug: bool = False
@@ -214,6 +230,7 @@ class Settings:
             kenburns=KenBurnsSettings(),
             tts=TTSSettings(),
             image=ImageSettings(),
+            cine=CineSettings(),
             narrative=NarrativeSettings(),
             paths=paths,
             debug=debug,

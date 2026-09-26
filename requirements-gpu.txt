@@ -1,0 +1,7 @@
+# Optional Google Colab/T4 dependencies for --tts hf-gpu
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch
+transformers>=4.44.0
+accelerate>=0.33.0
+kokoro>=0.9.0
+soundfile>=0.12.1

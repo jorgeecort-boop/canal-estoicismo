@@ -6,6 +6,7 @@ import os
 import subprocess
 import time
 import warnings
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional
@@ -43,10 +44,11 @@ class TTSEngine:
         self._cache_dir = self.settings.paths.temp_dir / "tts_cache"
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         self._hf_pipeline = None
+        self._hf_gpu_pipeline = None
 
-    def _get_cache_key(self, text: str, voice: str, rate: str) -> str:
+    def _get_cache_key(self, text: str, voice: str, rate: str, provider: Optional[str] = None) -> str:
         """Generate cache key for text."""
-        content = f"{text}|{voice}|{rate}"
+        content = f"{text}|{voice}|{rate}|{provider}" if provider else f"{text}|{voice}|{rate}"
         return hashlib.sha256(content.encode()).hexdigest()[:16]
 
     def _get_cached_path(self, cache_key: str) -> Path:
@@ -217,6 +219,77 @@ class TTSEngine:
         except Exception as e:
             raise RuntimeError(f"HF TTS generation failed: {e}")
 
+    def _get_hf_gpu_pipeline(self):
+        """Load the optional GPU TTS pipeline once, on demand."""
+        if self._hf_gpu_pipeline is not None:
+            return self._hf_gpu_pipeline
+
+        try:
+            import torch
+            from transformers import pipeline
+        except ImportError as exc:
+            raise RuntimeError("GPU TTS requires torch and transformers") from exc
+
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA GPU not available for hf-gpu")
+
+        model_id = self.tts_settings.hf_gpu_model
+        try:
+            self._hf_gpu_pipeline = pipeline(
+                "text-to-speech",
+                model=model_id,
+                device=0,
+                torch_dtype=torch.float16,
+            )
+            print(f"   [INFO] GPU TTS loaded: {model_id}")
+            return self._hf_gpu_pipeline
+        except Exception as exc:
+            raise RuntimeError(f"Failed to load GPU TTS model {model_id}: {exc}") from exc
+
+    async def _generate_hf_gpu_tts(self, text: str, output_path: Path) -> float:
+        """Generate GPU speech in sentence-sized chunks and merge to MP3."""
+        try:
+            import numpy as np
+            import soundfile as sf
+        except ImportError as exc:
+            raise RuntimeError("GPU TTS requires numpy and soundfile") from exc
+
+        pipe = self._get_hf_gpu_pipeline()
+        chunks = [part.strip() for part in re.split(r"(?<=[.!?¿¡:;])\s+", text) if part.strip()]
+        if not chunks:
+            chunks = [text]
+
+        audio_parts = []
+        sample_rate = None
+        for chunk in chunks:
+            try:
+                result = pipe(chunk, voice=self.tts_settings.hf_gpu_voice)
+            except TypeError:
+                # Transformers pipelines that do not expose a voice argument.
+                result = pipe(chunk)
+            audio = np.asarray(result["audio"], dtype=np.float32)
+            if audio.ndim > 1:
+                audio = np.squeeze(audio)
+            sample_rate = sample_rate or int(result.get("sampling_rate", 24000))
+            audio_parts.append(audio)
+
+        merged = np.concatenate(audio_parts)
+        wav_path = output_path.with_suffix(".wav")
+        sf.write(str(wav_path), merged, sample_rate)
+        try:
+            cmd = ["ffmpeg", "-y", "-i", str(wav_path), "-codec:a", "libmp3lame", "-q:a", "2", str(output_path)]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            await proc.communicate()
+            if proc.returncode != 0 or not output_path.exists():
+                raise RuntimeError("FFmpeg failed to encode GPU TTS audio")
+        finally:
+            wav_path.unlink(missing_ok=True)
+
+        self._normalize_audio(output_path)
+        return self._get_audio_duration(output_path)
+
     def _generate_gtts(
         self,
         text: str,
@@ -239,7 +312,7 @@ class TTSEngine:
         self,
         text: str,
         voice: Optional[str] = None,
-        provider: Optional[Literal["edge-tts", "hf", "gtts"]] = None,
+        provider: Optional[Literal["edge-tts", "hf", "hf-gpu", "gtts"]] = None,
         use_cache: bool = True,
     ) -> TTSResult:
         """Generate audio from text - Proveedores gratis."""
@@ -248,14 +321,22 @@ class TTSEngine:
         voice = voice or self.tts_settings.voice
 
         # Check cache
-        cache_key = self._get_cache_key(text, voice, self.tts_settings.rate)
+        cache_key = self._get_cache_key(text, voice, self.tts_settings.rate, provider)
         cached_path = self._get_cached_path(cache_key)
 
-        if use_cache and cached_path.exists():
-            duration = self._get_audio_duration(cached_path)
-            if duration > 0:
+        # Backward compatibility with caches created before provider-aware keys.
+        legacy_cached_path = self._get_cached_path(self._get_cache_key(text, voice, self.tts_settings.rate))
+
+        cache_candidates = [cached_path]
+        if legacy_cached_path != cached_path:
+            cache_candidates.append(legacy_cached_path)
+        if use_cache:
+            for candidate in cache_candidates:
+                duration = self._get_audio_duration(candidate) if candidate.exists() else 0.0
+                if duration <= 0:
+                    continue
                 return TTSResult(
-                    audio_path=cached_path,
+                    audio_path=candidate,
                     duration=duration,
                     text=text,
                     voice=voice,
@@ -267,7 +348,9 @@ class TTSEngine:
 
         # Provider priority order
         providers_to_try = [provider]
-        if provider == "edge-tts":
+        if provider == "hf-gpu":
+            providers_to_try.extend(["edge-tts", "gtts"])
+        elif provider == "edge-tts":
             providers_to_try.extend(["hf", "gtts"])
         elif provider == "hf":
             providers_to_try.extend(["edge-tts", "gtts"])
@@ -280,6 +363,8 @@ class TTSEngine:
                 elif prov == "hf":
                     # Use MMS-TTS Spanish model for best quality
                     duration = await self._generate_hf_tts(text, output_path)
+                elif prov == "hf-gpu":
+                    duration = await self._generate_hf_gpu_tts(text, output_path)
                 elif prov == "gtts":
                     duration = self._generate_gtts(text, output_path)
                 else:
@@ -313,7 +398,7 @@ class TTSEngine:
     async def generate_for_scene(
         self,
         scene,
-        provider: Optional[Literal["edge-tts", "hf", "gtts"]] = None,
+        provider: Optional[Literal["edge-tts", "hf", "hf-gpu", "gtts"]] = None,
     ) -> TTSResult:
         """Generate audio for a Scene object."""
         result = await self.generate(scene.voiceover_text, voice=self.tts_settings.voice, provider=provider)
@@ -324,7 +409,7 @@ class TTSEngine:
     async def generate_for_story(
         self,
         story,
-        provider: Optional[Literal["edge-tts", "hf", "gtts"]] = None,
+        provider: Optional[Literal["edge-tts", "hf", "hf-gpu", "gtts"]] = None,
         progress_callback=None,
     ) -> list[TTSResult]:
         """Generate audio for all scenes in a story."""
@@ -348,7 +433,7 @@ class TTSEngine:
 def generate_tts_sync(
     text: str,
     voice: Optional[str] = None,
-    provider: Optional[Literal["edge-tts", "hf", "gtts"]] = None,
+    provider: Optional[Literal["edge-tts", "hf", "hf-gpu", "gtts"]] = None,
     settings=None,
 ) -> TTSResult:
     """Synchronous TTS generation."""

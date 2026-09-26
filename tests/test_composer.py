@@ -66,6 +66,14 @@ class TestVideoComposer:
         assert composer.kenburns_settings.enabled is True
         assert composer._temp_dir.exists()
 
+    def test_cine_filter_off_by_default(self, composer):
+        assert composer._build_cine_filter() == ""
+
+    def test_xfade_round_robin(self, composer):
+        assert [composer._xfade_transition(i) for i in range(6)] == [
+            "fade", "dissolve", "wipeleft", "slideright", "fade", "dissolve"
+        ]
+
     @patch("src.video.composer.subprocess.run")
     def test_get_video_duration_success(self, mock_run, composer):
         mock_run.return_value = MagicMock(returncode=0, stdout="45.5\n")

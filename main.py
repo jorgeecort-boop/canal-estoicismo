@@ -5,6 +5,7 @@ import argparse
 import asyncio
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 
 from config import get_settings
@@ -45,12 +46,16 @@ Examples:
     gen_parser.add_argument("--output", "-o", type=Path, help="Output video path")
     gen_parser.add_argument("--duration", type=float, help="Target duration in minutes")
     gen_parser.add_argument("--scenes", type=int, help="Number of scenes")
+    gen_parser.add_argument("--tts", choices=["edge-tts", "hf", "hf-gpu", "gtts"], help="TTS provider")
+    gen_parser.add_argument("--cinematic", action="store_true", help="Enable optional cinematic effects")
 
     # Batch command
     batch_parser = subparsers.add_parser("batch", help="Generate multiple videos")
     batch_parser.add_argument("--count", type=int, default=3, help="Number of videos")
     batch_parser.add_argument("--output-dir", type=Path, default=Path("./output"), help="Output directory")
     batch_parser.add_argument("--themes", nargs="+", help="Specific themes to use")
+    batch_parser.add_argument("--tts", choices=["edge-tts", "hf", "hf-gpu", "gtts"], help="TTS provider")
+    batch_parser.add_argument("--cinematic", action="store_true", help="Enable optional cinematic effects")
 
     # Test command
     test_parser = subparsers.add_parser("test", help="Test pipeline with a single scene")
@@ -137,6 +142,8 @@ async def batch_generate(args, settings) -> list[Path]:
             output = output_path
             duration = None
             scenes = None
+            tts = getattr(args, "tts", None)
+            cinematic = getattr(args, "cinematic", False)
 
         try:
             path = await generate_video(Args(), settings)
@@ -195,6 +202,10 @@ def main():
 
     # Load settings
     settings = get_settings(debug=args.debug, draft_mode=args.draft)
+    if getattr(args, "tts", None):
+        settings = replace(settings, tts=replace(settings.tts, provider=args.tts))
+    if getattr(args, "cinematic", False):
+        settings = replace(settings, cine=replace(settings.cine, enabled=True))
 
     # Run command
     try:

@@ -45,6 +45,49 @@ class VideoComposer:
         self._temp_dir = self.settings.paths.temp_dir / "video_composition"
         self._temp_dir.mkdir(parents=True, exist_ok=True)
 
+    def _build_cine_filter(self) -> str:
+        """Build the optional FFmpeg cinematic filter chain."""
+        cine = self.settings.cine
+        if not cine.enabled:
+            return ""
+        return (
+            f"eq=saturation={cine.saturation}:contrast={cine.contrast},"
+            f"vignette=PI/5,noise=alls={cine.grain}:allf=t"
+        )
+
+    def _xfade_transition(self, index: int) -> str:
+        """Return a deterministic transition name for a scene boundary."""
+        return ("fade", "dissolve", "wipeleft", "slideright")[index % 4]
+
+    def _mix_music_bed(self, video_path: Path) -> bool:
+        """Mix assets/music.mp3 under narration when an optional bed exists."""
+        music_path = self.settings.paths.assets_dir / "music.mp3"
+        if not music_path.exists():
+            return True
+
+        mixed_path = video_path.with_suffix(".music.mp4")
+        filter_complex = (
+            "[1:a]volume=0.16[bg];"
+            "[bg][0:a]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=300[duckedbg];"
+            "[0:a][duckedbg]amix=inputs=2:duration=first:dropout_transition=2[a]"
+        )
+        cmd = [
+            "ffmpeg", "-y", "-i", str(video_path), "-stream_loop", "-1", "-i", str(music_path),
+            "-filter_complex", filter_complex, "-map", "0:v:0", "-map", "[a]",
+            "-c:v", "copy", "-c:a", self.video_settings.audio_codec,
+            "-b:a", self.video_settings.audio_bitrate, "-shortest", str(mixed_path),
+        ]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+            if result.returncode == 0 and mixed_path.exists():
+                mixed_path.replace(video_path)
+                return True
+            print("   [WARN] Optional music bed failed; keeping narration-only audio")
+        except Exception as exc:
+            print(f"   [WARN] Optional music bed skipped: {exc}")
+        mixed_path.unlink(missing_ok=True)
+        return False
+
     def _get_video_duration(self, video_path: Path) -> float:
         """Get video duration using ffprobe."""
         try:
@@ -254,6 +297,28 @@ class VideoComposer:
                 # Crop and resize
                 cropped = img.crop((left, top, left + crop_w, top + crop_h))
                 resized = cropped.resize((target_w, target_h), Image.LANCZOS)
+
+                if self.settings.cine.enabled:
+                    from PIL import ImageEnhance
+                    cine = self.settings.cine
+                    resized = ImageEnhance.Color(resized).enhance(cine.saturation)
+                    resized = ImageEnhance.Contrast(resized).enhance(cine.contrast)
+                    frame = np.asarray(resized).astype(np.float32)
+                    yy, xx = np.ogrid[:target_h, :target_w]
+                    distance = np.sqrt(
+                        ((xx - target_w / 2) / (target_w / 2)) ** 2
+                        + ((yy - target_h / 2) / (target_h / 2)) ** 2
+                    )
+                    vignette = np.clip(
+                        1.0 - cine.vignette * np.maximum(distance - 0.15, 0.0),
+                        0.72,
+                        1.0,
+                    )
+                    frame *= vignette[..., None]
+                    if cine.grain:
+                        rng = np.random.default_rng(int(t * self.video_settings.fps) + scene_number)
+                        frame += rng.normal(0, cine.grain / 2, frame.shape[:2])[..., None]
+                    return np.clip(frame, 0, 255).astype(np.uint8)
                 
                 return np.array(resized)
             
@@ -342,6 +407,10 @@ class VideoComposer:
         else:
             filter_complex = f"[0:v]{text_filter}[v]"
 
+        cine_filter = self._build_cine_filter()
+        if cine_filter:
+            filter_complex = filter_complex.replace("[v]", f",{cine_filter}[v]", 1)
+
         cmd = [
             "ffmpeg", "-y",
             "-loop", "1",
@@ -402,6 +471,10 @@ class VideoComposer:
             filter_complex = f"[0:v]{kenburns},{text_filter}[v]"
         else:
             filter_complex = f"[0:v]{text_filter}[v]"
+
+        cine_filter = self._build_cine_filter()
+        if cine_filter:
+            filter_complex = filter_complex.replace("[v]", f",{cine_filter}[v]", 1)
 
         cmd = [
             "ffmpeg", "-y",
@@ -593,6 +666,8 @@ class VideoComposer:
         success = self._concatenate_videos(scene_videos, output_path)
         if not success:
             raise RuntimeError("Failed to concatenate scenes")
+
+        self._mix_music_bed(output_path)
 
         # Cleanup temp scene files
         for sv in scene_videos:

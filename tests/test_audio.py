@@ -141,6 +141,21 @@ class TestTTSEngine:
         assert result.text == "Test text"
 
     @pytest.mark.asyncio
+    async def test_hf_gpu_fallback_to_edge_on_oom(self, engine):
+        async def fake_edge(_text, output_path, _voice=None):
+            output_path.write_bytes(b"audio")
+            return 4.0
+
+        with patch.object(engine, "_generate_hf_gpu_tts", side_effect=RuntimeError("CUDA out of memory")):
+            with patch.object(engine, "_generate_edge_tts", side_effect=fake_edge) as edge:
+                with patch.object(engine, "_get_audio_duration", return_value=4.0):
+                    result = await engine.generate(
+                        "Texto de prueba.", provider="hf-gpu", use_cache=False
+                    )
+        assert result.provider == "edge-tts"
+        edge.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_generate_for_scene(self, engine):
         from src.narrative import Scene
 

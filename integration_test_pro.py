@@ -207,8 +207,9 @@ async def main():
     parser.add_argument("--output", default="./output_pro", help="Directorio de salida")
     parser.add_argument("--draft", action="store_true", help="Modo draft (2s/escena)")
     parser.add_argument("--no-gemini", action="store_true", help="Usar plantillas locales en lugar de Gemini")
-    parser.add_argument("--tts", default="edge-tts", choices=["edge-tts", "hf", "gtts"],
+    parser.add_argument("--tts", default="edge-tts", choices=["edge-tts", "hf", "hf-gpu", "gtts"],
                        help="Proveedor TTS: edge-tts (rápido), hf (Hugging Face, calidad), gtts (fallback)")
+    parser.add_argument("--cinematic", action="store_true", help="Activar efectos cinematográficos opcionales")
 
     args = parser.parse_args()
 
@@ -223,6 +224,11 @@ async def main():
 
     test = ProIntegrationTest(output_dir, draft_mode=draft_mode, use_gemini=use_gemini)
     test.provider = args.tts  # Override TTS provider
+    if args.cinematic:
+        from dataclasses import replace
+        test.settings = replace(test.settings, cine=replace(test.settings.cine, enabled=True))
+        test.tts_engine = TTSEngine(test.settings)
+        test.composer = VideoComposer(test.settings)
 
     try:
         video_path = await test.run_test(args.theme, args.scenes)
