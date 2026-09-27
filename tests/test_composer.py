@@ -69,6 +69,11 @@ class TestVideoComposer:
     def test_cine_filter_off_by_default(self, composer):
         assert composer._build_cine_filter() == ""
 
+    def test_visual_engine_off_by_default(self, composer):
+        assert composer.visual_engine_settings.enabled is False
+        frame = __import__("numpy").zeros((8, 8, 3), dtype="uint8")
+        assert (composer._ambient_fx(frame, 0.0, 1, ()) == frame).all()
+
     def test_xfade_round_robin(self, composer):
         assert [composer._xfade_transition(i) for i in range(6)] == [
             "fade", "dissolve", "wipeleft", "slideright", "fade", "dissolve"

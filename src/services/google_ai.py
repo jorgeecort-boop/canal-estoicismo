@@ -75,7 +75,7 @@ class GoogleAIService:
         except Exception as e:
             print(f"[ERROR] Failed to initialize Gemini: {e}")
 
-    def generate_story(self, theme: str, num_scenes: int = 5, target_duration_min: float = 4.0) -> Optional[StoicStoryData]:
+    def generate_story(self, theme: str, num_scenes: int = 5, target_duration_min: float = 5.0) -> Optional[StoicStoryData]:
         """Generate a stoic story using Gemini."""
         if not self.model and not getattr(self, '_client', None):
             return None

@@ -144,10 +144,21 @@ class CineSettings:
 
 
 @dataclass(frozen=True)
+class VisualEngineSettings:
+    """Optional image-to-animation layer for the MoviePy composer."""
+    enabled: bool = False
+    particle_count: int = 80
+    smoke_alpha: float = 0.04
+    lamp_flicker: float = 0.03
+    seed: int = 0
+
+
+@dataclass(frozen=True)
 class NarrativeSettings:
     """Story generation configuration."""
-    target_duration_min: float = 3.0
-    target_duration_max: float = 5.0
+    # Long-form videos are intentionally constrained to 5-8 minutes.
+    target_duration_min: float = 5.0
+    target_duration_max: float = 8.0
     scenes_min: int = 5
     scenes_max: int = 8
     words_per_minute: int = 140
@@ -212,6 +223,7 @@ class Settings:
     tts: TTSSettings
     image: ImageSettings
     cine: CineSettings
+    visual_engine: VisualEngineSettings
     narrative: NarrativeSettings
     paths: PathSettings
     debug: bool = False
@@ -232,6 +244,7 @@ class Settings:
             tts=TTSSettings(),
             image=ImageSettings(),
             cine=CineSettings(),
+            visual_engine=VisualEngineSettings(),
             narrative=NarrativeSettings(),
             paths=paths,
             debug=debug,

@@ -42,6 +42,7 @@ class VideoComposer:
         self.video_settings = self.settings.video
         self.font_settings = self.settings.font
         self.kenburns_settings = self.settings.kenburns
+        self.visual_engine_settings = self.settings.visual_engine
         self._temp_dir = self.settings.paths.temp_dir / "video_composition"
         self._temp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -234,6 +235,52 @@ class VideoComposer:
             f"enable='between(t,0,{duration})'"
         )
 
+    def _ambient_fx(self, frame, t: float, scene_number: int, particles):
+        """Add optional particles, smoke, and lamp-like light fluctuation."""
+        if not self.visual_engine_settings.enabled:
+            return frame
+
+        from PIL import Image, ImageDraw, ImageEnhance
+        import numpy as np
+
+        settings = self.visual_engine_settings
+        height, width = frame.shape[:2]
+        result = Image.fromarray(frame.astype(np.uint8), mode="RGB")
+
+        # Particles drift with deterministic Gaussian velocities so renders remain reproducible.
+        particle_layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(particle_layer)
+        for x, y, vx, vy, radius, alpha in particles:
+            px = (x + vx * t) % width
+            py = (y + vy * t) % height
+            a = int(alpha * (0.65 + 0.35 * np.sin(t * 1.7 + x)))
+            draw.ellipse((px - radius, py - radius, px + radius, py + radius), fill=(245, 230, 190, max(0, a)))
+
+        # A few broad translucent ellipses provide restrained rising smoke.
+        smoke_alpha = int(255 * settings.smoke_alpha * (0.5 + 0.5 * np.sin(t * 0.8)))
+        smoke_x = int(width * (0.68 + 0.04 * np.sin(t * 0.35)))
+        smoke_y = int(height * (0.72 - 0.08 * (t % 8) / 8))
+        draw.ellipse((smoke_x - width * 0.12, smoke_y - height * 0.20,
+                      smoke_x + width * 0.12, smoke_y + height * 0.20),
+                     fill=(190, 190, 180, max(0, smoke_alpha)))
+        result = Image.alpha_composite(result.convert("RGBA"), particle_layer).convert("RGB")
+
+        flicker = 1.0 + settings.lamp_flicker * np.sin(t * 2.4 + scene_number)
+        return np.asarray(ImageEnhance.Brightness(result).enhance(float(flicker)))
+
+    def _make_particles(self, width: int, height: int, scene_number: int):
+        """Create deterministic ambient particle parameters for one scene."""
+        import numpy as np
+
+        settings = self.visual_engine_settings
+        rng = np.random.default_rng(settings.seed + scene_number)
+        count = max(0, settings.particle_count)
+        positions = rng.normal((width / 2, height / 2), (width * 0.36, height * 0.36), (count, 2))
+        velocities = rng.normal(0, (width * 0.008, height * 0.004), (count, 2))
+        radii = rng.uniform(1.0, 3.0, count)
+        alphas = rng.uniform(25.0, 80.0, count)
+        return list(zip(positions[:, 0], positions[:, 1], velocities[:, 0], velocities[:, 1], radii, alphas))
+
     def _apply_kenburns_and_text(self, image_path: Path, audio_path: Path, text_overlay: str, 
                                   output_path: Path, scene_duration: float, scene_number: int) -> bool:
         """Apply Ken Burns effect and text overlay using MoviePy (v2.x)."""
@@ -251,6 +298,11 @@ class VideoComposer:
             import numpy as np
             import random
             import os
+
+            particles = (
+                self._make_particles(target_w, target_h, scene_number)
+                if self.visual_engine_settings.enabled else ()
+            )
 
             # Load image
             img = Image.open(image_path)
@@ -294,9 +346,24 @@ class VideoComposer:
                 left = max(0, min(int(cx - crop_w / 2), img_w - crop_w))
                 top = max(0, min(int(cy - crop_h / 2), img_h - crop_h))
                 
-                # Crop and resize
+                # Crop and resize. The optional visual engine uses a slower background
+                # crop and a centered, feathered subject crop as a lightweight 2.5D layer.
                 cropped = img.crop((left, top, left + crop_w, top + crop_h))
                 resized = cropped.resize((target_w, target_h), Image.LANCZOS)
+                if self.visual_engine_settings.enabled:
+                    bg_zoom = max(1.0, curr_zoom * 0.98)
+                    bg_w = max(1, int(img_w / bg_zoom))
+                    bg_h = max(1, int(img_h / bg_zoom))
+                    bg_progress = progress * 0.5
+                    bg_left = max(0, min(int(cx - bg_w / 2 + (img_w - bg_w) * 0.08 * bg_progress), img_w - bg_w))
+                    bg_top = max(0, min(int(cy - bg_h / 2 + (img_h - bg_h) * 0.04 * bg_progress), img_h - bg_h))
+                    background = img.crop((bg_left, bg_top, bg_left + bg_w, bg_top + bg_h)).resize((target_w, target_h), Image.LANCZOS).convert("RGBA")
+                    subject = resized.convert("RGBA")
+                    mask = Image.new("L", (target_w, target_h), 0)
+                    mask_draw = ImageDraw.Draw(mask)
+                    mask_draw.ellipse((target_w * 0.08, target_h * 0.02, target_w * 0.92, target_h * 1.02), fill=235)
+                    subject.putalpha(mask)
+                    resized = Image.alpha_composite(background, subject).convert("RGB")
 
                 if self.settings.cine.enabled:
                     from PIL import ImageEnhance
@@ -318,9 +385,11 @@ class VideoComposer:
                     if cine.grain:
                         rng = np.random.default_rng(int(t * self.video_settings.fps) + scene_number)
                         frame += rng.normal(0, cine.grain / 2, frame.shape[:2])[..., None]
-                    return np.clip(frame, 0, 255).astype(np.uint8)
+                    frame = np.clip(frame, 0, 255).astype(np.uint8)
+                    return self._ambient_fx(frame, t, scene_number, particles)
                 
-                return np.array(resized)
+                frame = np.array(resized)
+                return self._ambient_fx(frame, t, scene_number, particles)
             
             clip = VideoClip(make_frame, duration=scene_duration)
             clip.fps = self.video_settings.fps

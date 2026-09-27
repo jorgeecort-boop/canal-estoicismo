@@ -13,6 +13,7 @@ from config.settings import (
     TTSSettings,
     ImageSettings,
     NarrativeSettings,
+    VisualEngineSettings,
     PathSettings,
 )
 
@@ -69,12 +70,21 @@ class TestImageSettings:
 class TestNarrativeSettings:
     def test_default_values(self):
         s = NarrativeSettings()
-        assert s.target_duration_min == 3.0
-        assert s.target_duration_max == 5.0
+        assert s.target_duration_min == 5.0
+        assert s.target_duration_max == 8.0
         assert s.scenes_min == 5
         assert s.scenes_max == 8
         assert "control_dichotomy" in s.themes
         assert "Marcus Aurelius" in s.philosophers
+
+
+class TestVisualEngineSettings:
+    def test_disabled_by_default(self):
+        s = VisualEngineSettings()
+        assert s.enabled is False
+        assert s.particle_count == 80
+        assert s.smoke_alpha == 0.04
+        assert s.lamp_flicker == 0.03
 
 
 class TestPathSettings:

@@ -130,7 +130,7 @@ class ProIntegrationTest:
         
         if self.use_gemini and self.google_ai and self.google_ai.model:
             print("   Usando Google Gemini API...")
-            gemini_data = self.google_ai.generate_story(theme, num_scenes=num_scenes, target_duration_min=4.0)
+            gemini_data = self.google_ai.generate_story(theme, num_scenes=num_scenes, target_duration_min=5.0)
             if gemini_data:
                 story = create_story_from_gemini(gemini_data)
                 print(f"   [OK] Guión generado por Gemini: {story.title}")

@@ -4,7 +4,7 @@ Sistema automatizado para crear videos de YouTube sobre estoicismo usando diapos
 
 ## Características
 
-- **Generación narrativa**: Historias estoicas de 3-5 minutos divididas en escenas
+- **Generación narrativa**: Historias estoicas de 5-8 minutos divididas en escenas
 - **Text-to-Speech**: Voces profundas y pausadas (edge-tts / gTTS)
 - **Composición de video**: Ken Burns effect, subtítulos estilizados, 1080p
 - **Pipeline modular**: Código limpio, testeado, listo para CI/CD
@@ -80,18 +80,18 @@ from google.colab import files
 files.download("./output_colab/stoic_integration_control_dichotomy_*.mp4")
 ```
 
-**Tiempo estimado en Colab T4**: ~2-3 minutos para video 3-5 min (SDXL Turbo 2 pasos por imagen).
+**Tiempo estimado en Colab T4**: ~2-3 minutos para video 5-8 min (SDXL Turbo 2 pasos por imagen).
 
 ## Uso
 
 ### Generar un video individual
 
 ```bash
-# Video completo (3-5 min)
+# Video completo (5-8 min)
 python main.py generate --theme control_dichotomy
 
 # Tema específico con duración personalizada
-python main.py generate --theme memento_mori --duration 4 --scenes 6
+python main.py generate --theme memento_mori --duration 5 --scenes 6
 
 # Modo borrador (2s por escena para testing rápido)
 python main.py generate --theme amor_fati --draft
