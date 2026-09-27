@@ -1,0 +1,2 @@
+# Optional offline CPU TTS provider; compatible with the current Colab Python.
+piper-tts>=1.8.0

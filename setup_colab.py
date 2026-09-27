@@ -16,7 +16,7 @@ from pathlib import Path
 
 REPO_URL = "https://github.com/jorgeecort-boop/canal-estoicismo.git"
 PROJECT_DIR = Path("/content/canal-estoicismo")
-REQUIRED_APT = ["ffmpeg", "fonts-dejavu-core", "fonts-dejavu-extra"]
+REQUIRED_APT = ["ffmpeg", "espeak-ng", "fonts-dejavu-core", "fonts-dejavu-extra"]
 REQUIRED_PIP = [
     "edge-tts>=6.1.0",
     "gtts>=2.5.0",

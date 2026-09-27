@@ -7,6 +7,7 @@ import subprocess
 import time
 import warnings
 import re
+import wave
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional
@@ -45,6 +46,7 @@ class TTSEngine:
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         self._hf_pipeline = None
         self._hf_gpu_pipeline = None
+        self._piper_voice = None
 
     def _get_cache_key(self, text: str, voice: str, rate: str, provider: Optional[str] = None) -> str:
         """Generate cache key for text."""
@@ -290,6 +292,56 @@ class TTSEngine:
         self._normalize_audio(output_path)
         return self._get_audio_duration(output_path)
 
+    def _get_piper_voice(self):
+        """Load or download the configured Piper voice once, on demand."""
+        if self._piper_voice is not None:
+            return self._piper_voice
+
+        try:
+            from piper import PiperVoice
+        except ImportError as exc:
+            raise RuntimeError("Piper requires piper-tts; install requirements-piper.txt") from exc
+
+        voice_id = self.tts_settings.piper_voice
+        voices_dir = self.settings.paths.temp_dir / "piper_voices"
+        voices_dir.mkdir(parents=True, exist_ok=True)
+        model_path = voices_dir / f"{voice_id}.onnx"
+
+        if not model_path.exists():
+            cmd = [
+                os.fspath(__import__("sys").executable), "-m", "piper.download_voices",
+                voice_id, "--data-dir", str(voices_dir),
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+            if result.returncode != 0 or not model_path.exists():
+                detail = (result.stderr or result.stdout).strip()[-500:]
+                raise RuntimeError(f"Could not download Piper voice {voice_id}: {detail}")
+
+        self._piper_voice = PiperVoice.load(str(model_path), use_cuda=False)
+        print(f"   [INFO] Piper CPU voice loaded: {voice_id}")
+        return self._piper_voice
+
+    async def _generate_piper_cpu_tts(self, text: str, output_path: Path) -> float:
+        """Generate offline Spanish speech with Piper ONNX on CPU."""
+        voice = self._get_piper_voice()
+        wav_path = output_path.with_suffix(".wav")
+        try:
+            with wave.open(str(wav_path), "wb") as wav_file:
+                voice.synthesize_wav(text, wav_file)
+
+            cmd = ["ffmpeg", "-y", "-i", str(wav_path), "-codec:a", "libmp3lame", "-q:a", "2", str(output_path)]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            await proc.communicate()
+            if proc.returncode != 0 or not output_path.exists():
+                raise RuntimeError("FFmpeg failed to encode Piper audio")
+        finally:
+            wav_path.unlink(missing_ok=True)
+
+        self._normalize_audio(output_path)
+        return self._get_audio_duration(output_path)
+
     def _generate_gtts(
         self,
         text: str,
@@ -312,7 +364,7 @@ class TTSEngine:
         self,
         text: str,
         voice: Optional[str] = None,
-        provider: Optional[Literal["edge-tts", "hf", "hf-gpu", "gtts"]] = None,
+        provider: Optional[Literal["edge-tts", "hf", "hf-gpu", "piper-cpu", "gtts"]] = None,
         use_cache: bool = True,
     ) -> TTSResult:
         """Generate audio from text - Proveedores gratis."""
@@ -350,6 +402,8 @@ class TTSEngine:
         providers_to_try = [provider]
         if provider == "hf-gpu":
             providers_to_try.extend(["edge-tts", "gtts"])
+        elif provider == "piper-cpu":
+            providers_to_try.extend(["edge-tts", "gtts"])
         elif provider == "edge-tts":
             providers_to_try.extend(["hf", "gtts"])
         elif provider == "hf":
@@ -365,6 +419,8 @@ class TTSEngine:
                     duration = await self._generate_hf_tts(text, output_path)
                 elif prov == "hf-gpu":
                     duration = await self._generate_hf_gpu_tts(text, output_path)
+                elif prov == "piper-cpu":
+                    duration = await self._generate_piper_cpu_tts(text, output_path)
                 elif prov == "gtts":
                     duration = self._generate_gtts(text, output_path)
                 else:
@@ -398,7 +454,7 @@ class TTSEngine:
     async def generate_for_scene(
         self,
         scene,
-        provider: Optional[Literal["edge-tts", "hf", "hf-gpu", "gtts"]] = None,
+        provider: Optional[Literal["edge-tts", "hf", "hf-gpu", "piper-cpu", "gtts"]] = None,
     ) -> TTSResult:
         """Generate audio for a Scene object."""
         result = await self.generate(scene.voiceover_text, voice=self.tts_settings.voice, provider=provider)
@@ -409,7 +465,7 @@ class TTSEngine:
     async def generate_for_story(
         self,
         story,
-        provider: Optional[Literal["edge-tts", "hf", "hf-gpu", "gtts"]] = None,
+        provider: Optional[Literal["edge-tts", "hf", "hf-gpu", "piper-cpu", "gtts"]] = None,
         progress_callback=None,
     ) -> list[TTSResult]:
         """Generate audio for all scenes in a story."""
@@ -433,7 +489,7 @@ class TTSEngine:
 def generate_tts_sync(
     text: str,
     voice: Optional[str] = None,
-    provider: Optional[Literal["edge-tts", "hf", "hf-gpu", "gtts"]] = None,
+    provider: Optional[Literal["edge-tts", "hf", "hf-gpu", "piper-cpu", "gtts"]] = None,
     settings=None,
 ) -> TTSResult:
     """Synchronous TTS generation."""

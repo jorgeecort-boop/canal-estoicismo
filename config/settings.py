@@ -67,7 +67,7 @@ class KenBurnsSettings:
 @dataclass(frozen=True)
 class TTSSettings:
     """Text-to-Speech configuration - Solo opciones GRATIS sin facturación."""
-    provider: Literal["gtts", "edge-tts", "hf", "hf-gpu"] = "edge-tts"
+    provider: Literal["gtts", "edge-tts", "hf", "hf-gpu", "piper-cpu"] = "edge-tts"
     
     # Edge-TTS voices (gratis, sin API key, alta calidad)
     # Voces masculinas maduras recomendadas:
@@ -89,6 +89,7 @@ class TTSSettings:
     hf_gpu_model: str = "hexgrad/Kokoro-82M"
     hf_gpu_voice: str = "es_male"
     hf_gpu_lang: str = "es"
+    piper_voice: str = "es_ES-sharvard-medium"
     
     # Voces alternativas para testing
     voice_alternatives: tuple = (

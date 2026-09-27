@@ -156,6 +156,19 @@ class TestTTSEngine:
         edge.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_piper_fallback_to_edge(self, engine):
+        async def fake_edge(_text, output_path, _voice=None):
+            output_path.write_bytes(b"audio")
+            return 4.0
+
+        with patch.object(engine, "_generate_piper_cpu_tts", side_effect=RuntimeError("Piper unavailable")):
+            with patch.object(engine, "_generate_edge_tts", side_effect=fake_edge) as edge:
+                with patch.object(engine, "_get_audio_duration", return_value=4.0):
+                    result = await engine.generate("Texto de prueba.", provider="piper-cpu", use_cache=False)
+        assert result.provider == "edge-tts"
+        edge.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_generate_for_scene(self, engine):
         from src.narrative import Scene
 

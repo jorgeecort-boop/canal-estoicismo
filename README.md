@@ -95,6 +95,9 @@ python main.py generate --theme memento_mori --duration 4 --scenes 6
 
 # Modo borrador (2s por escena para testing rápido)
 python main.py generate --theme amor_fati --draft
+
+# Voz Piper offline en CPU (instala requirements-piper.txt primero)
+python main.py generate --theme control_dichotomy --scenes 3 --tts piper-cpu
 ```
 
 ### Generar lote de videos

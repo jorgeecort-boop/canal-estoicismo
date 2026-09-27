@@ -46,7 +46,7 @@ Examples:
     gen_parser.add_argument("--output", "-o", type=Path, help="Output video path")
     gen_parser.add_argument("--duration", type=float, help="Target duration in minutes")
     gen_parser.add_argument("--scenes", type=int, help="Number of scenes")
-    gen_parser.add_argument("--tts", choices=["edge-tts", "hf", "hf-gpu", "gtts"], help="TTS provider")
+    gen_parser.add_argument("--tts", choices=["edge-tts", "hf", "hf-gpu", "piper-cpu", "gtts"], help="TTS provider")
     gen_parser.add_argument("--cinematic", action="store_true", help="Enable optional cinematic effects")
 
     # Batch command
@@ -54,7 +54,7 @@ Examples:
     batch_parser.add_argument("--count", type=int, default=3, help="Number of videos")
     batch_parser.add_argument("--output-dir", type=Path, default=Path("./output"), help="Output directory")
     batch_parser.add_argument("--themes", nargs="+", help="Specific themes to use")
-    batch_parser.add_argument("--tts", choices=["edge-tts", "hf", "hf-gpu", "gtts"], help="TTS provider")
+    batch_parser.add_argument("--tts", choices=["edge-tts", "hf", "hf-gpu", "piper-cpu", "gtts"], help="TTS provider")
     batch_parser.add_argument("--cinematic", action="store_true", help="Enable optional cinematic effects")
 
     # Test command

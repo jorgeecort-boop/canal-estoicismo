@@ -207,7 +207,7 @@ async def main():
     parser.add_argument("--output", default="./output_pro", help="Directorio de salida")
     parser.add_argument("--draft", action="store_true", help="Modo draft (2s/escena)")
     parser.add_argument("--no-gemini", action="store_true", help="Usar plantillas locales en lugar de Gemini")
-    parser.add_argument("--tts", default="edge-tts", choices=["edge-tts", "hf", "hf-gpu", "gtts"],
+    parser.add_argument("--tts", default="edge-tts", choices=["edge-tts", "hf", "hf-gpu", "piper-cpu", "gtts"],
                        help="Proveedor TTS: edge-tts (rápido), hf (Hugging Face, calidad), gtts (fallback)")
     parser.add_argument("--cinematic", action="store_true", help="Activar efectos cinematográficos opcionales")
 
