@@ -181,6 +181,7 @@ class StoryGenerator:
                     chunk,
                     i,
                     section_scenes,
+                    global_scene=scene_num,
                 )
 
                 # Create text overlay (short version)
@@ -261,28 +262,32 @@ class StoryGenerator:
         chunk: str,
         scene_index: int,
         total_in_section: int,
+        global_scene: int | None = None,
     ) -> str:
         """Build an image generation prompt for the scene."""
 
         # Base style
         base_style = self.settings.image.style_prompt
 
-        # Section-specific visual emphasis
+        # Section-specific visual emphasis (rotated to avoid repetitive statues)
         section_visuals = {
             "hook": "dramatic opening, mysterious atmosphere, cinematic lighting",
-            "core_teaching": "ancient wisdom visualization, philosophical symbols, marble",
-            "practical_application": "person applying wisdom, daily life stoic, serene focus",
-            "closing_reflection": "transcendent, peaceful resolution, golden light, eternal",
+            "core_teaching": "dark chiaroscuro, ancient stone hall, volumetric light shafts",
+            "practical_application": "ethereal golden light, daily stoic life, warm focus",
+            "closing_reflection": "ancient fresco texture, transcendent peaceful resolution, eternal",
         }
 
         # Keywords from template
         keywords = " ".join(template.image_keywords[:3])
 
-        # Combine
+        # Combine (include theme + global scene to avoid cache collisions)
         prompt_parts = [
             base_style,
             section_visuals.get(section, ""),
             keywords,
+            f"theme={template.theme}",
+            f"global_scene={global_scene if global_scene is not None else scene_index + 1}",
+            f"section={section}",
             f"scene {scene_index + 1} of {total_in_section}",
         ]
 

@@ -48,7 +48,7 @@ class TestKenBurnsSettings:
     def test_default_values(self):
         s = KenBurnsSettings()
         assert s.enabled is True
-        assert s.zoom_factor == 1.15
+        assert s.zoom_factor == 1.21
         assert s.direction == "random"
 
 
@@ -82,9 +82,9 @@ class TestVisualEngineSettings:
     def test_disabled_by_default(self):
         s = VisualEngineSettings()
         assert s.enabled is False
-        assert s.particle_count == 80
-        assert s.smoke_alpha == 0.04
-        assert s.lamp_flicker == 0.03
+        assert s.particle_count == 120
+        assert s.smoke_alpha == 0.075
+        assert s.lamp_flicker == 0.05
 
 
 class TestPathSettings:

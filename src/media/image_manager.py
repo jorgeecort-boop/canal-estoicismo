@@ -123,7 +123,7 @@ class MediaManager:
         
         url = f"https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height}&nologo=true&private=true&enhance=true&seed={scene_id}&model=flux"
         
-        cache_key = self._get_cache_key(prompt)
+        cache_key = self._get_cache_key(f"{prompt}|scene:{scene_id}")
         output_path = self._get_cached_path(cache_key)
 
         max_retries = 2
@@ -158,7 +158,7 @@ class MediaManager:
 
     def _create_placeholder(self, prompt: str, scene_id: int) -> ImageAsset:
         """Create a resilient fallback placeholder image using PIL."""
-        cache_key = self._get_cache_key(prompt)
+        cache_key = self._get_cache_key(f"{prompt}|scene:{scene_id}")
         output_path = self._get_cached_path(cache_key)
 
         try:
@@ -211,8 +211,8 @@ class MediaManager:
         self.clean_legacy_caches()
         provider = provider or self.image_settings.provider
 
-        # Try cache first (now validated)
-        cache_key = self._get_cache_key(prompt)
+        # Try cache first (now validated, scoped per scene to avoid collisions)
+        cache_key = self._get_cache_key(f"{prompt}|scene:{scene_id}")
         cached = self._get_cached_path(cache_key)
         if self._verify_image(cached):
             return ImageAsset(

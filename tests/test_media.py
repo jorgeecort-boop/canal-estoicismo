@@ -144,7 +144,7 @@ class TestMediaManager:
     # ── get_image_for_prompt: uses valid cache, skips Pollinations ────
     @patch("src.media.image_manager.requests.get")
     def test_get_image_uses_valid_cache(self, mock_get, manager):
-        cache_key = manager._get_cache_key("Cached prompt")
+        cache_key = manager._get_cache_key("Cached prompt|scene:1")
         cached_path = manager._get_cached_path(cache_key)
         cached_path.write_bytes(_make_valid_jpeg_bytes())
 
@@ -155,7 +155,7 @@ class TestMediaManager:
     # ── get_image_for_prompt: corrupted cache forces Pollinations ─────
     @patch("src.media.image_manager.requests.get")
     def test_get_image_invalidates_corrupt_cache(self, mock_get, manager):
-        cache_key = manager._get_cache_key("Bad cached prompt")
+        cache_key = manager._get_cache_key("Bad cached prompt|scene:2")
         cached_path = manager._get_cached_path(cache_key)
         cached_path.write_bytes(b"corrupt")
 

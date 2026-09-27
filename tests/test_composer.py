@@ -94,18 +94,18 @@ class TestVideoComposer:
     def test_build_kenburns_filter_zoom_in(self, composer):
         filter_str = composer._build_kenburns_filter(1920, 1080, 10.0, "zoom_in")
         assert "zoompan" in filter_str
-        assert "zoom=1+(1.15-1)*on/300" in filter_str
+        assert "zoom=1+(1.21-1)*on/300" in filter_str
         assert "d=300" in filter_str  # 10s * 30fps
 
     def test_build_kenburns_filter_zoom_out(self, composer):
         filter_str = composer._build_kenburns_filter(1920, 1080, 10.0, "zoom_out")
         assert "zoompan" in filter_str
-        assert "zoom=1.15-(1.15-1)*on/300" in filter_str
+        assert "zoom=1.21-(1.21-1)*on/300" in filter_str
 
     def test_build_kenburns_filter_pan_left(self, composer):
         filter_str = composer._build_kenburns_filter(1920, 1080, 10.0, "pan_left")
         assert "zoompan" in filter_str
-        assert "zoom=1.15" in filter_str
+        assert "zoom=1.21" in filter_str
         assert "(iw-iw/zoom)*(1-on/300" in filter_str
 
     def test_build_text_filter_bottom(self, composer):

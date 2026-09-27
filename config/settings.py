@@ -58,7 +58,7 @@ class FontSettings:
 class KenBurnsSettings:
     """Ken Burns effect configuration."""
     enabled: bool = True
-    zoom_factor: float = 1.15
+    zoom_factor: float = 1.21
     duration_factor: float = 1.0
     easing: Literal["linear", "ease_in", "ease_out", "ease_in_out"] = "ease_in_out"
     direction: Literal["zoom_in", "zoom_out", "pan_left", "pan_right", "random"] = "random"
@@ -147,9 +147,9 @@ class CineSettings:
 class VisualEngineSettings:
     """Optional image-to-animation layer for the MoviePy composer."""
     enabled: bool = False
-    particle_count: int = 80
-    smoke_alpha: float = 0.04
-    lamp_flicker: float = 0.03
+    particle_count: int = 120
+    smoke_alpha: float = 0.075
+    lamp_flicker: float = 0.05
     seed: int = 0
 
 

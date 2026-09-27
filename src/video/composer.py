@@ -277,8 +277,8 @@ class VideoComposer:
         count = max(0, settings.particle_count)
         positions = rng.normal((width / 2, height / 2), (width * 0.36, height * 0.36), (count, 2))
         velocities = rng.normal(0, (width * 0.008, height * 0.004), (count, 2))
-        radii = rng.uniform(1.0, 3.0, count)
-        alphas = rng.uniform(25.0, 80.0, count)
+        radii = rng.uniform(1.5, 4.0, count)
+        alphas = rng.uniform(60.0, 120.0, count)
         return list(zip(positions[:, 0], positions[:, 1], velocities[:, 0], velocities[:, 1], radii, alphas))
 
     def _apply_kenburns_and_text(self, image_path: Path, audio_path: Path, text_overlay: str, 
@@ -309,11 +309,11 @@ class VideoComposer:
                 if self.visual_engine_settings.enabled else ()
             )
 
-            # Ken Burns effect parameters
+            # Ken Burns effect parameters (deterministic per scene for reproducibility)
             zoom = self.kenburns_settings.zoom_factor
             direction = self.kenburns_settings.direction
             if direction == "random":
-                direction = random.choice(["zoom_in", "zoom_out", "pan_left", "pan_right"])
+                direction = random.Random(scene_number).choice(["zoom_in", "zoom_out", "pan_left", "pan_right"])
 
             # Create video clip from frames using VideoClip with lazy make_frame function
             def make_frame(t):
@@ -351,12 +351,12 @@ class VideoComposer:
                 cropped = img.crop((left, top, left + crop_w, top + crop_h))
                 resized = cropped.resize((target_w, target_h), Image.LANCZOS)
                 if self.visual_engine_settings.enabled:
-                    bg_zoom = max(1.0, curr_zoom * 0.98)
+                    bg_zoom = max(1.0, curr_zoom * 0.94)
                     bg_w = max(1, int(img_w / bg_zoom))
                     bg_h = max(1, int(img_h / bg_zoom))
                     bg_progress = progress * 0.5
-                    bg_left = max(0, min(int(cx - bg_w / 2 + (img_w - bg_w) * 0.08 * bg_progress), img_w - bg_w))
-                    bg_top = max(0, min(int(cy - bg_h / 2 + (img_h - bg_h) * 0.04 * bg_progress), img_h - bg_h))
+                    bg_left = max(0, min(int(cx - bg_w / 2 + (img_w - bg_w) * 0.12 * bg_progress), img_w - bg_w))
+                    bg_top = max(0, min(int(cy - bg_h / 2 + (img_h - bg_h) * 0.06 * bg_progress), img_h - bg_h))
                     background = img.crop((bg_left, bg_top, bg_left + bg_w, bg_top + bg_h)).resize((target_w, target_h), Image.LANCZOS).convert("RGBA")
                     subject = resized.convert("RGBA")
                     mask = Image.new("L", (target_w, target_h), 0)
