@@ -48,6 +48,7 @@ Examples:
     gen_parser.add_argument("--scenes", type=int, help="Number of scenes")
     gen_parser.add_argument("--tts", choices=["edge-tts", "hf", "hf-gpu", "piper-cpu", "gtts"], help="TTS provider")
     gen_parser.add_argument("--cinematic", action="store_true", help="Enable optional cinematic effects")
+    gen_parser.add_argument("--visual-engine", action="store_true", help="Enable optional visual engine animation")
 
     # Batch command
     batch_parser = subparsers.add_parser("batch", help="Generate multiple videos")
@@ -56,6 +57,7 @@ Examples:
     batch_parser.add_argument("--themes", nargs="+", help="Specific themes to use")
     batch_parser.add_argument("--tts", choices=["edge-tts", "hf", "hf-gpu", "piper-cpu", "gtts"], help="TTS provider")
     batch_parser.add_argument("--cinematic", action="store_true", help="Enable optional cinematic effects")
+    batch_parser.add_argument("--visual-engine", action="store_true", help="Enable optional visual engine animation")
 
     # Test command
     test_parser = subparsers.add_parser("test", help="Test pipeline with a single scene")
@@ -144,6 +146,7 @@ async def batch_generate(args, settings) -> list[Path]:
             scenes = None
             tts = getattr(args, "tts", None)
             cinematic = getattr(args, "cinematic", False)
+            visual_engine = getattr(args, "visual_engine", False)
 
         try:
             path = await generate_video(Args(), settings)
@@ -206,6 +209,8 @@ def main():
         settings = replace(settings, tts=replace(settings.tts, provider=args.tts))
     if getattr(args, "cinematic", False):
         settings = replace(settings, cine=replace(settings.cine, enabled=True))
+    if getattr(args, "visual_engine", False):
+        settings = replace(settings, visual_engine=replace(settings.visual_engine, enabled=True))
 
     # Run command
     try:
