@@ -299,15 +299,15 @@ class VideoComposer:
             import random
             import os
 
-            particles = (
-                self._make_particles(target_w, target_h, scene_number)
-                if self.visual_engine_settings.enabled else ()
-            )
-
             # Load image
             img = Image.open(image_path)
             img_w, img_h = img.size
             target_w, target_h = self.video_settings.width, self.video_settings.height
+
+            particles = (
+                self._make_particles(target_w, target_h, scene_number)
+                if self.visual_engine_settings.enabled else ()
+            )
 
             # Ken Burns effect parameters
             zoom = self.kenburns_settings.zoom_factor
