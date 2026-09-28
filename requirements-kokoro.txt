@@ -1,0 +1,8 @@
+# Optional Kokoro GPU TTS (--tts hf-gpu). Requires Python <3.13.
+# Colab default Python 3.13 cannot install kokoro/misaki; use requirements-piper.txt instead.
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch
+transformers>=4.44.0
+accelerate>=0.33.0
+kokoro>=0.9.0
+soundfile>=0.12.1

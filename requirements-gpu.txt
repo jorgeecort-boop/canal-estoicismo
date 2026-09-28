@@ -1,11 +1,11 @@
-# Optional Google Colab/T4 dependencies for --tts hf-gpu + --image-provider sdxl_local
+# Optional Google Colab/T4 dependencies for --image-provider sdxl_local
+# NOTE: kokoro moved to requirements-kokoro.txt (needs Python <3.13; Colab 3.13 cannot install it).
 --extra-index-url https://download.pytorch.org/whl/cu121
 torch
 transformers>=4.44.0
 accelerate>=0.33.0
 diffusers>=0.30.0
 opencv-python-headless>=4.8.0
-kokoro>=0.9.0
 soundfile>=0.12.1
 # Real-ESRGAN upscale is optional (GPU only, installed on demand):
 # realesrgan>=0.3.0
