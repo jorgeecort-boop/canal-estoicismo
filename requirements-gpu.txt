@@ -1,7 +1,12 @@
-# Optional Google Colab/T4 dependencies for --tts hf-gpu
+# Optional Google Colab/T4 dependencies for --tts hf-gpu + --image-provider sdxl_local
 --extra-index-url https://download.pytorch.org/whl/cu121
 torch
 transformers>=4.44.0
 accelerate>=0.33.0
+diffusers>=0.30.0
+opencv-python-headless>=4.8.0
 kokoro>=0.9.0
 soundfile>=0.12.1
+# Real-ESRGAN upscale is optional (GPU only, installed on demand):
+# realesrgan>=0.3.0
+# basicsr>=1.4.2

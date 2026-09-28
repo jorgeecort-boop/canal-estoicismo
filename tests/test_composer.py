@@ -79,6 +79,16 @@ class TestVideoComposer:
             "fade", "dissolve", "wipeleft", "slideright", "fade", "dissolve"
         ]
 
+    def test_varied_xfade_single_clip_copies(self, composer, tmp_path):
+        src = tmp_path / "a.mp4"
+        src.write_bytes(b"data")
+        out = tmp_path / "out.mp4"
+        assert composer._concatenate_videos_varied_xfade([src], out) is True
+        assert out.exists()
+
+    def test_transitions_off_by_default(self, composer):
+        assert composer.settings.transitions.varied is False
+
     @patch("src.video.composer.subprocess.run")
     def test_get_video_duration_success(self, mock_run, composer):
         mock_run.return_value = MagicMock(returncode=0, stdout="45.5\n")

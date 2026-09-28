@@ -49,6 +49,9 @@ Examples:
     gen_parser.add_argument("--tts", choices=["edge-tts", "hf", "hf-gpu", "piper-cpu", "gtts"], help="TTS provider")
     gen_parser.add_argument("--cinematic", action="store_true", help="Enable optional cinematic effects")
     gen_parser.add_argument("--visual-engine", action="store_true", help="Enable optional visual engine animation")
+    gen_parser.add_argument("--image-provider", choices=["local_assets", "sdxl_local", "pollinations"], default=None, help="Image provider (opt-in sdxl_local for T4)")
+    gen_parser.add_argument("--upscale", action="store_true", help="Enable Real-ESRGAN upscale when <1080p (T4)")
+    gen_parser.add_argument("--transitions", choices=["crossfade", "varied"], default="crossfade", help="Concat transitions (varied opt-in)")
 
     # Batch command
     batch_parser = subparsers.add_parser("batch", help="Generate multiple videos")
@@ -58,6 +61,9 @@ Examples:
     batch_parser.add_argument("--tts", choices=["edge-tts", "hf", "hf-gpu", "piper-cpu", "gtts"], help="TTS provider")
     batch_parser.add_argument("--cinematic", action="store_true", help="Enable optional cinematic effects")
     batch_parser.add_argument("--visual-engine", action="store_true", help="Enable optional visual engine animation")
+    batch_parser.add_argument("--image-provider", choices=["local_assets", "sdxl_local", "pollinations"], default=None, help="Image provider (opt-in sdxl_local for T4)")
+    batch_parser.add_argument("--upscale", action="store_true", help="Enable Real-ESRGAN upscale when <1080p (T4)")
+    batch_parser.add_argument("--transitions", choices=["crossfade", "varied"], default="crossfade", help="Concat transitions (varied opt-in)")
 
     # Test command
     test_parser = subparsers.add_parser("test", help="Test pipeline with a single scene")
@@ -147,6 +153,9 @@ async def batch_generate(args, settings) -> list[Path]:
             tts = getattr(args, "tts", None)
             cinematic = getattr(args, "cinematic", False)
             visual_engine = getattr(args, "visual_engine", False)
+            image_provider = getattr(args, "image_provider", None)
+            upscale = getattr(args, "upscale", False)
+            transitions = getattr(args, "transitions", "crossfade")
 
         try:
             path = await generate_video(Args(), settings)
@@ -211,6 +220,12 @@ def main():
         settings = replace(settings, cine=replace(settings.cine, enabled=True))
     if getattr(args, "visual_engine", False):
         settings = replace(settings, visual_engine=replace(settings.visual_engine, enabled=True))
+    if getattr(args, "image_provider", None):
+        settings = replace(settings, image=replace(settings.image, provider=args.image_provider))
+    if getattr(args, "upscale", False):
+        settings = replace(settings, image=replace(settings.image, upscale_enabled=True))
+    if getattr(args, "transitions", "crossfade") == "varied":
+        settings = replace(settings, transitions=replace(settings.transitions, varied=True))
 
     # Run command
     try:

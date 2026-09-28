@@ -652,6 +652,49 @@ class VideoComposer:
         
         return result
 
+    def _concatenate_videos_varied_xfade(self, scene_paths: list[Path], output_path: Path) -> bool:
+        """Concatenate with varied FFmpeg xfade + acrossfade (opt-in, 3-scene tested)."""
+        if len(scene_paths) <= 1:
+            import shutil
+            shutil.copy2(scene_paths[0], output_path)
+            return True
+        try:
+            transitions = ["fade", "dissolve", "wipeleft", "slideright"]
+            tcfg = self.settings.transitions
+            dur = max(0.1, min(1.0, tcfg.duration))
+            cmd = ["ffmpeg", "-y"]
+            for p in scene_paths:
+                cmd += ["-i", str(p)]
+            fc = []
+            # Video chain
+            vlabel = "[0:v]"
+            offset = 0.0
+            for i in range(1, len(scene_paths)):
+                # durations via ffprobe
+                d_prev = self._get_video_duration(scene_paths[i - 1]) or 5.0
+                offset = offset + d_prev - dur if i == 1 else offset + (self._get_video_duration(scene_paths[i - 1]) or 5.0) - dur
+                tr = transitions[(i - 1) % len(transitions)]
+                out = f"[vx{i}]" if i < len(scene_paths) - 1 else "[v]"
+                fc.append(f"{vlabel}[{i}:v]xfade=transition={tr}:duration={dur}:offset={offset:.3f}{out}")
+                vlabel = out
+            # Audio chain acrossfade
+            alabel = "[0:a]"
+            for i in range(1, len(scene_paths)):
+                out = f"[ax{i}]" if i < len(scene_paths) - 1 else "[a]"
+                fc.append(f"{alabel}[{i}:a]acrossfade=d={dur}:curve=tri{out}")
+                alabel = out
+            cmd += ["-filter_complex", ";".join(fc), "-map", "[v]", "-map", "[a]",
+                    "-c:v", self.video_settings.codec, "-preset", self.video_settings.preset,
+                    "-pix_fmt", "yuv420p", "-c:a", self.video_settings.audio_codec, str(output_path)]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            if result.returncode != 0:
+                print(f"   [WARN] Varied xfade failed, falling back to crossfade")
+                return self._concatenate_videos(scene_paths, output_path)
+            return True
+        except Exception as exc:
+            print(f"   [WARN] Varied xfade error ({exc}); falling back to crossfade")
+            return self._concatenate_videos(scene_paths, output_path)
+
     def _concatenate_videos_ffmpeg(self, scene_paths: list[Path], output_path: Path) -> bool:
         """Concatenate using FFmpeg (fallback)."""
         concat_file = self._temp_dir / "concat_list.txt"
@@ -731,8 +774,12 @@ class VideoComposer:
         if progress_callback:
             progress_callback(len(story.scenes), len(story.scenes), "Concatenating scenes")
 
-        # Concatenate all scenes
-        success = self._concatenate_videos(scene_videos, output_path)
+        # Concatenate all scenes (varied xfade opt-in, crossfade fallback)
+        transitions = getattr(self.settings, "transitions", None)
+        if transitions is not None and transitions.varied:
+            success = self._concatenate_videos_varied_xfade(scene_videos, output_path)
+        else:
+            success = self._concatenate_videos(scene_videos, output_path)
         if not success:
             raise RuntimeError("Failed to concatenate scenes")
 

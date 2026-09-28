@@ -209,6 +209,40 @@ class TestMediaManager:
             assert scene.image_path is not None
 
 
+class TestSDXLLocalOptIn:
+    @pytest.fixture
+    def settings(self):
+        reset_settings()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            settings = get_settings(root)
+            assets_dir = settings.paths.assets_dir / "images"
+            assets_dir.mkdir(parents=True, exist_ok=True)
+            yield settings
+        reset_settings()
+
+    @pytest.fixture
+    def manager(self, settings):
+        return ImageManager(settings)
+
+    def test_sdxl_failure_falls_back_to_pollinations(self, manager):
+        with patch.object(manager, "_generate_sdxl_local", return_value=None) as mock_sdxl, \
+             patch.object(manager, "_generate_pollinations") as mock_pol, \
+             patch.object(manager, "_create_placeholder") as mock_ph:
+            from dataclasses import replace
+            settings = replace(manager.settings, image=replace(manager.settings.image, provider="sdxl_local"))
+            manager.settings = settings
+            manager.image_settings = settings.image
+            mock_pol.return_value = MagicMock(path=Path("x.jpg"))
+            manager.get_image_for_prompt("P", scene_id=7)
+            mock_sdxl.assert_called_once()
+            mock_pol.assert_called_once()
+            mock_ph.assert_not_called()
+
+    def test_upscale_disabled_by_default(self, manager):
+        assert manager.image_settings.upscale_enabled is False
+
+
 class TestGetImageManager:
     def test_singleton(self):
         reset_settings()

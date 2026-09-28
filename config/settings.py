@@ -118,7 +118,7 @@ class TTSSettings:
 @dataclass(frozen=True)
 class ImageSettings:
     """Image generation/asset configuration."""
-    provider: Literal["dalle", "stable_diffusion", "local_assets", "pexels", "unsplash"] = "local_assets"
+    provider: Literal["dalle", "stable_diffusion", "sdxl_local", "local_assets", "pexels", "unsplash"] = "local_assets"
     style_prompt: str = (
         "cinematic stoic aesthetic, marble statue, classical art, "
         "dark moody lighting, volumetric fog, dramatic shadows, "
@@ -131,6 +131,15 @@ class ImageSettings:
     local_assets_path: Path = Path("assets/images")
     width: int = 1920
     height: int = 1080
+    # SDXL-Turbo local (T4 opt-in). 16:9 native 1024x576, 2-4 steps.
+    sdxl_model: str = "stabilityai/sdxl-turbo"
+    sdxl_steps: int = 2
+    sdxl_width: int = 1024
+    sdxl_height: int = 576
+    sdxl_guidance: float = 0.0
+    # Real-ESRGAN upscale (T4 opt-in, only when image < 1080p)
+    upscale_enabled: bool = False
+    upscale_model: str = "RealESRGAN_x4plus"
 
 
 @dataclass(frozen=True)
@@ -215,6 +224,13 @@ class PathSettings:
 
 
 @dataclass(frozen=True)
+class TransitionSettings:
+    """Varied xfade transitions (opt-in). Crossfade remains the fallback."""
+    varied: bool = False
+    duration: float = 0.5
+
+
+@dataclass(frozen=True)
 class Settings:
     """Main application settings container."""
     video: VideoSettings
@@ -224,6 +240,7 @@ class Settings:
     image: ImageSettings
     cine: CineSettings
     visual_engine: VisualEngineSettings
+    transitions: TransitionSettings
     narrative: NarrativeSettings
     paths: PathSettings
     debug: bool = False
@@ -245,6 +262,7 @@ class Settings:
             image=ImageSettings(),
             cine=CineSettings(),
             visual_engine=VisualEngineSettings(),
+            transitions=TransitionSettings(),
             narrative=NarrativeSettings(),
             paths=paths,
             debug=debug,

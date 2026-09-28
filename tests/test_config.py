@@ -66,6 +66,12 @@ class TestImageSettings:
         assert s.provider == "local_assets"
         assert "marble statue" in s.style_prompt
 
+    def test_sdxl_opt_in_defaults(self):
+        s = ImageSettings()
+        assert s.sdxl_width == 1024
+        assert s.sdxl_height == 576
+        assert s.upscale_enabled is False
+
 
 class TestNarrativeSettings:
     def test_default_values(self):

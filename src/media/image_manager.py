@@ -53,6 +53,65 @@ class MediaManager:
         self._assets_dir = assets_root / "images"
         self._assets_dir.mkdir(parents=True, exist_ok=True)
         self._rng = random.Random()
+        self._sdxl_pipeline = None
+
+    def _get_sdxl_pipeline(self):
+        """Load SDXL-Turbo once on T4 (lazy singleton)."""
+        if self._sdxl_pipeline is not None:
+            return self._sdxl_pipeline
+        try:
+            import torch
+            from diffusers import AutoPipelineForText2Image
+        except ImportError as exc:
+            raise RuntimeError("SDXL requires diffusers+torch; install requirements-gpu.txt") from exc
+        if not torch.cuda.is_available():
+            raise RuntimeError("SDXL local requires CUDA GPU (T4)")
+        cfg = self.image_settings
+        pipe = AutoPipelineForText2Image.from_pretrained(
+            cfg.sdxl_model, torch_dtype=torch.float16, variant="fp16",
+        ).to("cuda")
+        try:
+            pipe.enable_model_cpu_offload()
+        except Exception:
+            pass
+        self._sdxl_pipeline = pipe
+        print(f"   [INFO] SDXL loaded once: {cfg.sdxl_model}")
+        return pipe
+
+    def _generate_sdxl_local(self, prompt: str, scene_id: int) -> Optional[ImageAsset]:
+        """Generate 16:9 image with SDXL-Turbo (2-4 steps, seed per scene)."""
+        cfg = self.image_settings
+        style_35mm = (
+            "photorealistic 35mm film still, stoic aesthetic, dramatic chiaroscuro, "
+            "marble texture, deep shadows, Rembrandt lighting, moody grade, highly detailed, 8k"
+        )
+        full_prompt = f"{prompt}, {style_35mm}"
+        cache_key = self._get_cache_key(f"{prompt}|sdxl:{scene_id}")
+        output_path = self._get_cached_path(cache_key)
+        if self._verify_image(output_path):
+            return ImageAsset(path=output_path, prompt=prompt, source="sdxl-cache",
+                              width=cfg.width, height=cfg.height)
+        try:
+            import torch
+            pipe = self._get_sdxl_pipeline()
+            image = pipe(
+                prompt=full_prompt,
+                negative_prompt=cfg.style_prompt and self.image_settings.negative_prompt,
+                width=cfg.sdxl_width, height=cfg.sdxl_height,
+                num_inference_steps=max(1, min(4, cfg.sdxl_steps)),
+                guidance_scale=cfg.sdxl_guidance,
+                generator=torch.Generator(device="cuda").manual_seed(1000 + scene_id),
+            ).images[0]
+            image = image.resize((cfg.width, cfg.height), Image.LANCZOS)
+            image.save(output_path, "JPEG", quality=92)
+            if not self._verify_image(output_path):
+                output_path.unlink(missing_ok=True)
+                return None
+            return ImageAsset(path=output_path, prompt=prompt, source="sdxl-local",
+                              width=cfg.width, height=cfg.height)
+        except Exception as exc:
+            print(f"   [WARN] SDXL local failed scene {scene_id}: {exc}")
+            return None
 
     def _get_cache_key(self, prompt: str) -> str:
         """Generate cache key for prompt."""
@@ -201,6 +260,46 @@ class MediaManager:
             height=self.image_settings.height,
         )
 
+    def _maybe_upscale(self, path: Path) -> Path:
+        """Upscale to 1920x1080 only if smaller; Real-ESRGAN on CUDA, else Lanczos."""
+        if not self.image_settings.upscale_enabled:
+            return path
+        try:
+            with Image.open(path) as img:
+                w, h = img.size
+            if w >= 1920 and h >= 1080:
+                return path
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    from realesrgan import RealESRGANer
+                    from basicsr.archs.rrdbnet_arch import RRDBNet
+                    model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64,
+                                    num_block=23, num_grow_ch=32, scale=4)
+                    upsampler = RealESRGANer(scale=4, model_path=None, model=model,
+                                             tile=512, tile_pad=10, pre_pad=0,
+                                             half=True, gpu_id=0)
+                    import numpy as np
+                    import cv2
+                    raw = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+                    out, _ = upsampler.enhance(raw, outscale=2)
+                    cv2.imwrite(str(path), out)
+            except Exception as exc:
+                print(f"   [INFO] Real-ESRGAN skipped ({exc}); using Lanczos")
+            with Image.open(path) as img:
+                if img.size != (1920, 1080):
+                    img.resize((1920, 1080), Image.LANCZOS).save(path, "JPEG", quality=92)
+            # Subtle color after upscale
+            with Image.open(path) as img:
+                from PIL import ImageEnhance
+                img = ImageEnhance.Color(img).enhance(1.05)
+                img = ImageEnhance.Contrast(img).enhance(1.03)
+                img.save(path, "JPEG", quality=92)
+            return path
+        except Exception as exc:
+            print(f"   [WARN] Upscale failed: {exc}")
+            return path
+
     def get_image_for_prompt(
         self,
         prompt: str,
@@ -235,10 +334,19 @@ class MediaManager:
                     height=self.image_settings.height,
                 )
 
+        # SDXL local primary on T4 (opt-in), Pollinations fallback
+        if provider == "sdxl_local":
+            sdxl_asset = self._generate_sdxl_local(prompt, scene_id)
+            if sdxl_asset:
+                sdxl_asset.path = self._maybe_upscale(sdxl_asset.path)
+                return sdxl_asset
+            print(f"   [INFO] SDXL failed, falling back to Pollinations for scene {scene_id}...")
+
         # Pollinations generation
         print(f"   [INFO] Generando imagen real (Pollinations AI) para escena {scene_id}...")
         pollinations_asset = self._generate_pollinations(prompt, scene_id)
         if pollinations_asset:
+            pollinations_asset.path = self._maybe_upscale(pollinations_asset.path)
             return pollinations_asset
 
         # Final Fallback
