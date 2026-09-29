@@ -52,6 +52,7 @@ Examples:
     gen_parser.add_argument("--image-provider", choices=["local_assets", "sdxl_local", "pollinations"], default=None, help="Image provider (opt-in sdxl_local for T4)")
     gen_parser.add_argument("--upscale", action="store_true", help="Enable Real-ESRGAN upscale when <1080p (T4)")
     gen_parser.add_argument("--transitions", choices=["crossfade", "varied"], default="crossfade", help="Concat transitions (varied opt-in)")
+    gen_parser.add_argument("--gemini", action="store_true", help="Use Gemini long-form script (needs GOOGLE_API_KEY)")
 
     # Batch command
     batch_parser = subparsers.add_parser("batch", help="Generate multiple videos")
@@ -64,6 +65,7 @@ Examples:
     batch_parser.add_argument("--image-provider", choices=["local_assets", "sdxl_local", "pollinations"], default=None, help="Image provider (opt-in sdxl_local for T4)")
     batch_parser.add_argument("--upscale", action="store_true", help="Enable Real-ESRGAN upscale when <1080p (T4)")
     batch_parser.add_argument("--transitions", choices=["crossfade", "varied"], default="crossfade", help="Concat transitions (varied opt-in)")
+    batch_parser.add_argument("--gemini", action="store_true", help="Use Gemini long-form script (needs GOOGLE_API_KEY)")
 
     # Test command
     test_parser = subparsers.add_parser("test", help="Test pipeline with a single scene")
@@ -84,14 +86,42 @@ async def generate_video(args, settings) -> Path:
     if settings.draft_mode:
         print("   [DRAFT] DRAFT MODE: 2 seconds per scene")
 
-    # 1. Generate story
+    # 1. Generate story (Gemini long-form opt-in with ±10% word budget check)
     print("\n[STORY] Generating narrative...")
-    story_gen = StoryGenerator(settings)
-    story = story_gen.generate(
-        theme=args.theme,
-        target_duration=args.duration,
-        num_scenes=args.scenes,
-    )
+    story = None
+    use_gemini = getattr(args, "gemini", False)
+    target_duration = args.duration or 6.0
+    num_scenes = args.scenes or 10
+    if use_gemini:
+        try:
+            from src.services.google_ai import (
+                GoogleAIService, create_story_from_gemini,
+                story_within_budget, story_word_count,
+            )
+            service = GoogleAIService()
+            for attempt in range(1, 3):
+                gemini_data = service.generate_story(
+                    theme=args.theme or "control_dichotomy",
+                    num_scenes=num_scenes, target_duration_min=target_duration,
+                )
+                if not gemini_data:
+                    break
+                candidate = create_story_from_gemini(gemini_data)
+                words = story_word_count(candidate)
+                print(f"   Gemini attempt {attempt}: {words} words")
+                if story_within_budget(candidate, target_duration):
+                    story = candidate
+                    break
+                print(f"   [WARN] Out of ±10% budget, retrying...")
+        except Exception as exc:
+            print(f"   [WARN] Gemini failed ({exc}), using local templates")
+    if story is None:
+        story_gen = StoryGenerator(settings)
+        story = story_gen.generate(
+            theme=args.theme,
+            target_duration=args.duration,
+            num_scenes=args.scenes,
+        )
     print(f"   [OK] Story generated: {story.title} ({len(story.scenes)} scenes, ~{story.total_estimated_duration:.1f}s)")
 
     # 2. Generate audio + fetch images IN PARALLEL
@@ -156,6 +186,7 @@ async def batch_generate(args, settings) -> list[Path]:
             image_provider = getattr(args, "image_provider", None)
             upscale = getattr(args, "upscale", False)
             transitions = getattr(args, "transitions", "crossfade")
+            gemini = getattr(args, "gemini", False)
 
         try:
             path = await generate_video(Args(), settings)

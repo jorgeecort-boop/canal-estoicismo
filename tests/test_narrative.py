@@ -250,3 +250,25 @@ class TestCreateStoryFromOutline:
         assert len(story.scenes) == 2
         assert story.scenes[0].text_overlay == "Custom 1"
         assert story.total_estimated_duration == 25.0
+
+
+class TestGeminiWordBudget:
+    def test_prompt_uses_dynamic_budget(self):
+        from src.services.google_ai import GoogleAIService
+        service = GoogleAIService.__new__(GoogleAIService)
+        prompt = service._build_story_prompt("control_dichotomy", 10, 6.0)
+        assert "840" in prompt
+        assert "150-250" not in prompt
+
+    def test_word_count_validation(self):
+        from src.services.google_ai import story_within_budget, story_word_count
+        scenes = [Scene(i, f"O{i}", " ".join(["word"] * 90), f"P{i}") for i in range(1, 11)]
+        story = Story("control_dichotomy", "T", "Epicteto", scenes)
+        assert story_word_count(story) == 900
+        assert story_within_budget(story, 6.0) is True
+
+    def test_word_count_rejects_out_of_budget(self):
+        from src.services.google_ai import story_within_budget
+        scenes = [Scene(i, f"O{i}", " ".join(["word"] * 200), f"P{i}") for i in range(1, 11)]
+        story = Story("control_dichotomy", "T", "Epicteto", scenes)
+        assert story_within_budget(story, 6.0) is False

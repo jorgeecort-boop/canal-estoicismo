@@ -121,16 +121,21 @@ class GoogleAIService:
         return None
 
     def _build_story_prompt(self, theme: str, num_scenes: int, target_duration_min: float) -> str:
+        total_words = int(target_duration_min * 140)
+        per_scene = max(40, total_words // max(1, num_scenes))
+        lo, hi = max(40, per_scene - 15), per_scene + 15
         return f"""
 Eres un experto en filosofía estoica y guionista de documentales. Genera una historia estoica para un video de YouTube de {target_duration_min} minutos, dividida en {num_scenes} escenas.
 
 TEMA: {theme}
 
+PRESUPUESTO DE PALABRAS (obligatorio): {total_words} palabras en total aprox (±10%), unas {per_scene} por escena (rango {lo}-{hi}).
+
 REQUISITOS:
 1. Estilo narrativo: Profundo, reflexivo, tono de historiador/narrador maduro, voz grave y apacible
 2. Cada escena debe tener:
-   - text_overlay: Frase corta (máx 80 chars) para mostrar en pantalla como subtítulo
-   - voiceover_text: Narración completa (150-250 palabras por escena), tono de historiador sabio
+    - text_overlay: Frase corta (máx 80 chars) para mostrar en pantalla como subtítulo
+    - voiceover_text: Narración completa ({lo}-{hi} palabras por escena), tono de historiador sabio
    - image_prompt: Prompt detallado en INGLÉS para generación de imagen CINEMATOGRÁFICA ÚNICA por escena.
      CADA ESCENA DEBE TENER UNA COMPOSICIÓN VISUAL DIFERENTE:
      - Escena 1: Primer plano dramático (rostro, manos, objeto simbólico)
@@ -229,6 +234,18 @@ IMPORTANTE:
         scene_specific = scene_style
         
         return f"{base_prompt}, {enhancement}, {scene_specific}, {style} composition"
+
+
+def story_word_count(story: Story) -> int:
+    """Count total voiceover words in a story."""
+    return sum(len(s.voiceover_text.split()) for s in story.scenes)
+
+
+def story_within_budget(story: Story, target_duration_min: float, tolerance: float = 0.10) -> bool:
+    """Check total words within ±tolerance of 140 wpm target."""
+    target = target_duration_min * 140
+    lo, hi = target * (1 - tolerance), target * (1 + tolerance)
+    return lo <= story_word_count(story) <= hi
 
 
 def create_story_from_gemini(gemini_data: StoicStoryData) -> Story:
