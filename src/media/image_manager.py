@@ -68,12 +68,12 @@ class MediaManager:
             raise RuntimeError("SDXL local requires CUDA GPU (T4)")
         cfg = self.image_settings
         pipe = AutoPipelineForText2Image.from_pretrained(
-            cfg.sdxl_model, torch_dtype=torch.float16, variant="fp16",
-        ).to("cuda")
+            cfg.sdxl_model, dtype=torch.float16, variant="fp16",
+        )
         try:
             pipe.enable_model_cpu_offload()
         except Exception:
-            pass
+            pipe.to("cuda")
         self._sdxl_pipeline = pipe
         print(f"   [INFO] SDXL loaded once: {cfg.sdxl_model}")
         return pipe
@@ -85,7 +85,7 @@ class MediaManager:
             "photorealistic 35mm film still, stoic aesthetic, dramatic chiaroscuro, "
             "marble texture, deep shadows, Rembrandt lighting, moody grade, highly detailed, 8k"
         )
-        full_prompt = f"{prompt}, {style_35mm}"
+        full_prompt = f"{prompt[:200]}, {style_35mm}"[:300]
         cache_key = self._get_cache_key(f"{prompt}|sdxl:{scene_id}")
         output_path = self._get_cached_path(cache_key)
         if self._verify_image(output_path):
@@ -96,7 +96,7 @@ class MediaManager:
             pipe = self._get_sdxl_pipeline()
             image = pipe(
                 prompt=full_prompt,
-                negative_prompt=cfg.style_prompt and self.image_settings.negative_prompt,
+                negative_prompt=cfg.negative_prompt,
                 width=cfg.sdxl_width, height=cfg.sdxl_height,
                 num_inference_steps=max(1, min(4, cfg.sdxl_steps)),
                 guidance_scale=cfg.sdxl_guidance,
