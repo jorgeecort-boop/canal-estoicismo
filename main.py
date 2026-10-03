@@ -153,6 +153,11 @@ async def generate_video(args, settings) -> Path:
         words = sum(len(s.voiceover_text.split()) for s in story.scenes)
         print(f"   [WARN] Local templates: {words} words — for 5-8min use --llm ollama (~800-900 words)")
     print(f"   [OK] Story generated: {story.title} ({len(story.scenes)} scenes, ~{story.total_estimated_duration:.1f}s)")
+    if getattr(args, "output", None):
+        story_path = Path(args.output).with_suffix(".story.json")
+        story_path.parent.mkdir(parents=True, exist_ok=True)
+        story.save(story_path)
+        print(f"   [OK] Story saved: {story_path} (upload to Colab with --story-json)")
 
     # 2. Generate audio + fetch images IN PARALLEL
     print("\n[TTS+IMG] Generating voiceovers and fetching images in parallel...")
