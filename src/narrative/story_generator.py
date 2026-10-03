@@ -232,22 +232,22 @@ class StoryGenerator:
         return chunks
 
     def _create_text_overlay(self, voiceover: str, section: str) -> str:
-        """Create a short text overlay from voiceover text."""
-        max_chars = self.narrative_settings.text_overlay_max_chars
+        """Create a short text overlay (max 2 lines x 45 chars = 90)."""
+        max_total = 90
 
         # Extract key phrase - first sentence or key clause
         sentences = [s.strip() for s in voiceover.split(".") if s.strip()]
         if not sentences:
             return "Reflexiona..."
 
-        # Take first sentence, truncate if needed
+        # Take first sentence, truncate to two lines max
         overlay = sentences[0]
-        if len(overlay) > max_chars:
+        if len(overlay) > max_total:
             # Try to cut at a natural break
             words = overlay.split()
             result = []
             for word in words:
-                if len(" ".join(result + [word])) <= max_chars:
+                if len(" ".join(result + [word])) <= max_total:
                     result.append(word)
                 else:
                     break
@@ -280,11 +280,23 @@ class StoryGenerator:
         # Keywords from template
         keywords = " ".join(template.image_keywords[:3])
 
+        # Framing variety cycling by global scene (close-up / wide / detail / human / cosmic / fresco)
+        framings = (
+            "extreme close-up, shallow depth of field",
+            "wide cinematic shot, epic scale architecture",
+            "macro detail, ancient texture manuscript relief",
+            "human figure, philosopher in contemplation",
+            "aerial cosmic perspective, vast horizon",
+            "ancient fresco wall texture, mural painting style",
+        )
+        framing = framings[(global_scene - 1) % len(framings)] if global_scene else ""
+
         # Combine (include theme + global scene to avoid cache collisions)
         prompt_parts = [
             base_style,
             section_visuals.get(section, ""),
             keywords,
+            framing,
             f"theme={template.theme}",
             f"global_scene={global_scene if global_scene is not None else scene_index + 1}",
             f"section={section}",

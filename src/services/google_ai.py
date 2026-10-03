@@ -19,11 +19,19 @@ try:
 except ImportError:
     GENAI_NEW_AVAILABLE = False
 
-try:
-    import google.generativeai as genai_old
-    GENAI_OLD_AVAILABLE = True
-except ImportError:
+# Only import the legacy SDK when the maintained SDK is unavailable.  Apart
+# from avoiding a deprecation warning, this prevents the old package from
+# changing dependency resolution in Colab when google-genai is installed.
+if GENAI_NEW_AVAILABLE:
+    genai_old = None
     GENAI_OLD_AVAILABLE = False
+else:
+    try:
+        import google.generativeai as genai_old
+        GENAI_OLD_AVAILABLE = True
+    except ImportError:
+        genai_old = None
+        GENAI_OLD_AVAILABLE = False
 
 GENAI_AVAILABLE = GENAI_NEW_AVAILABLE or GENAI_OLD_AVAILABLE
 
@@ -44,9 +52,9 @@ class StoicStoryData:
 class GoogleAIService:
     """Service for Google Gemini API integration."""
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-1.5-pro"):
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
         self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
-        self.model_name = model
+        self.model_name = model or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
         self.model = None
         self._use_new_api = False
         self._init_model()

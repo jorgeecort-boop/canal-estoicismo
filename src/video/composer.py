@@ -68,7 +68,7 @@ class VideoComposer:
 
         mixed_path = video_path.with_suffix(".music.mp4")
         filter_complex = (
-            "[1:a]volume=0.16[bg];"
+            "[1:a]volume=0.06[bg];"
             "[bg][0:a]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=300[duckedbg];"
             "[0:a][duckedbg]amix=inputs=2:duration=first:dropout_transition=2[a]"
         )
@@ -321,13 +321,14 @@ class VideoComposer:
                 progress = t / max(0.001, scene_duration)
                 progress = min(1.0, max(0.0, progress))
                 
-                # Calculate zoom and position based on direction
+                # Calculate zoom and position based on direction (slight diagonal drift on zooms)
+                drift = (img_h / zoom / 2) * 0.12 * progress
                 if direction == "zoom_in":
                     curr_zoom = 1 + (zoom - 1) * progress
-                    cx, cy = img_w / 2, img_h / 2
+                    cx, cy = img_w / 2, img_h / 2 + drift
                 elif direction == "zoom_out":
                     curr_zoom = zoom - (zoom - 1) * progress
-                    cx, cy = img_w / 2, img_h / 2
+                    cx, cy = img_w / 2, img_h / 2 - drift
                 elif direction == "pan_left":
                     curr_zoom = zoom
                     cx = img_w / 2 - (img_w / zoom / 2) * (1 - progress)
@@ -405,12 +406,18 @@ class VideoComposer:
                     stroke_width=self.font_settings.stroke_width,
                     font=self.font_settings.windows_font_path if os.name == 'nt' else self.font_settings.linux_font_path,
                     method='caption',
-                    size=(target_w - 100, None),
+                    size=(target_w - 200, 260),
                 ).with_duration(scene_duration)
                 
-                # Position at bottom
+                # Position by the block's bottom edge.  MoviePy interprets a
+                # numeric y position as the top of the TextClip; placing the
+                # top at ``target_h - margin_bottom`` clips multi-line text.
                 if self.font_settings.position == "bottom":
-                    txt_clip = txt_clip.with_position(('center', target_h - self.font_settings.margin_bottom))
+                    y_position = max(
+                        0,
+                        target_h - self.font_settings.margin_bottom - txt_clip.h,
+                    )
+                    txt_clip = txt_clip.with_position(('center', y_position))
                 elif self.font_settings.position == "top":
                     txt_clip = txt_clip.with_position(('center', self.font_settings.margin_bottom))
                 else:

@@ -48,7 +48,7 @@ class TestKenBurnsSettings:
     def test_default_values(self):
         s = KenBurnsSettings()
         assert s.enabled is True
-        assert s.zoom_factor == 1.21
+        assert s.zoom_factor == 1.24
         assert s.direction == "random"
 
 

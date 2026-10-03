@@ -41,8 +41,9 @@ class FontSettings:
     stroke_color: str = "#1A1A1A"
     stroke_width: int = 3
     position: Literal["bottom", "center", "top"] = "bottom"
-    margin_bottom: int = 120
+    margin_bottom: int = 240
     max_chars_per_line: int = 45
+    max_lines: int = 2
     line_spacing: float = 1.3
 
     @property
@@ -58,7 +59,7 @@ class FontSettings:
 class KenBurnsSettings:
     """Ken Burns effect configuration."""
     enabled: bool = True
-    zoom_factor: float = 1.21
+    zoom_factor: float = 1.24
     duration_factor: float = 1.0
     easing: Literal["linear", "ease_in", "ease_out", "ease_in_out"] = "ease_in_out"
     direction: Literal["zoom_in", "zoom_out", "pan_left", "pan_right", "random"] = "random"

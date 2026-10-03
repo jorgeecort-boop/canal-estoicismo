@@ -8,7 +8,7 @@ import os
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 
 # Gemini model for story generation
-GEMINI_MODEL = "gemini-1.5-pro"
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 # Imagen model for image generation (if available)
 IMAGEN_MODEL = "imagen-3.0-generate-002"

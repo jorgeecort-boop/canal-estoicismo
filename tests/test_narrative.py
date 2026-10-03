@@ -196,8 +196,8 @@ class TestStoryGenerator:
             assert scene.voiceover_text
             assert scene.image_prompt
             assert scene.estimated_duration > 0
-            # Text overlay may slightly exceed max due to "..."
-            assert len(scene.text_overlay) <= 85  # max chars + ellipsis
+            # Text overlay capped at 2 lines x 45 chars + ellipsis
+            assert len(scene.text_overlay) <= 93
 
     def test_generate_multiple(self):
         gen = StoryGenerator()

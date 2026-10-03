@@ -104,18 +104,18 @@ class TestVideoComposer:
     def test_build_kenburns_filter_zoom_in(self, composer):
         filter_str = composer._build_kenburns_filter(1920, 1080, 10.0, "zoom_in")
         assert "zoompan" in filter_str
-        assert "zoom=1+(1.21-1)*on/300" in filter_str
+        assert "zoom=1+(1.24-1)*on/300" in filter_str
         assert "d=300" in filter_str  # 10s * 30fps
 
     def test_build_kenburns_filter_zoom_out(self, composer):
         filter_str = composer._build_kenburns_filter(1920, 1080, 10.0, "zoom_out")
         assert "zoompan" in filter_str
-        assert "zoom=1.21-(1.21-1)*on/300" in filter_str
+        assert "zoom=1.24-(1.24-1)*on/300" in filter_str
 
     def test_build_kenburns_filter_pan_left(self, composer):
         filter_str = composer._build_kenburns_filter(1920, 1080, 10.0, "pan_left")
         assert "zoompan" in filter_str
-        assert "zoom=1.21" in filter_str
+        assert "zoom=1.24" in filter_str
         assert "(iw-iw/zoom)*(1-on/300" in filter_str
 
     def test_build_text_filter_bottom(self, composer):
@@ -125,7 +125,7 @@ class TestVideoComposer:
         assert "fontcolor=0xF5F0E1" in filter_str
         assert "bordercolor=0x1A1A1A" in filter_str
         assert "borderw=3" in filter_str
-        assert "h-text_h-120" in filter_str  # bottom position
+        assert "h-text_h-240" in filter_str  # bottom position raised 120px
 
     def test_build_text_filter_special_chars(self, composer):
         # Test escaping

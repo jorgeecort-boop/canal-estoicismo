@@ -122,6 +122,8 @@ async def generate_video(args, settings) -> Path:
             target_duration=args.duration,
             num_scenes=args.scenes,
         )
+        words = sum(len(s.voiceover_text.split()) for s in story.scenes)
+        print(f"   [WARN] Local templates: {words} words — for 5-8min use --gemini (~800-900 words)")
     print(f"   [OK] Story generated: {story.title} ({len(story.scenes)} scenes, ~{story.total_estimated_duration:.1f}s)")
 
     # 2. Generate audio + fetch images IN PARALLEL
@@ -134,9 +136,10 @@ async def generate_video(args, settings) -> Path:
             print(f"   [TTS] Scene {scene_num}/{total}...", end="\r")
 
     # Run TTS and image downloads concurrently with asyncio.gather
+    image_concurrency = 1 if settings.image.provider == "sdxl_local" else 3
     await asyncio.gather(
         tts_engine.generate_for_story(story, progress_callback=audio_progress),
-        img_manager.fetch_images_for_story_async(story, max_concurrent=3),
+        img_manager.fetch_images_for_story_async(story, max_concurrent=image_concurrency),
     )
     print(f"   [OK] Audio + Images ready for {len(story.scenes)} scenes")
 
