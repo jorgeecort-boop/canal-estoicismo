@@ -3,6 +3,7 @@
 import json
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -272,3 +273,45 @@ class TestGeminiWordBudget:
         scenes = [Scene(i, f"O{i}", " ".join(["word"] * 200), f"P{i}") for i in range(1, 11)]
         story = Story("control_dichotomy", "T", "Epicteto", scenes)
         assert story_within_budget(story, 6.0) is False
+
+    def test_new_gemini_client_and_story_response(self, monkeypatch):
+        import src.services.google_ai as google_ai
+
+        payload = {
+            "title": "Control interior",
+            "philosopher": "Epicteto",
+            "theme": "control_dichotomy",
+            "scenes": [{
+                "scene_number": 1,
+                "text_overlay": "Controla tu respuesta",
+                "voiceover_text": "La serenidad comienza al distinguir lo que depende de nosotros.",
+                "image_prompt": "Stoic philosopher in a dark marble hall",
+                "estimated_duration": 8.0,
+            }],
+            "total_estimated_duration": 8.0,
+        }
+
+        class FakeClient:
+            class Models:
+                @staticmethod
+                def generate_content(**kwargs):
+                    assert kwargs["model"] == "gemini-test"
+                    return SimpleNamespace(text=json.dumps(payload))
+
+            models = Models()
+
+        class FakeGenAI:
+            Client = staticmethod(lambda api_key: FakeClient())
+
+        monkeypatch.setattr(google_ai, "GENAI_AVAILABLE", True)
+        monkeypatch.setattr(google_ai, "GENAI_NEW_AVAILABLE", True)
+        monkeypatch.setattr(google_ai, "genai_new", FakeGenAI)
+        monkeypatch.setenv("GEMINI_MODEL", "gemini-test")
+
+        service = google_ai.GoogleAIService(api_key="test-key")
+        result = service.generate_story("control_dichotomy", 1, 1.0)
+
+        assert service.model_name == "gemini-test"
+        assert result is not None
+        assert result.title == "Control interior"
+        assert result.scenes[0]["scene_number"] == 1
