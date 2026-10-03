@@ -54,7 +54,7 @@ class GoogleAIService:
     """Service for Google Gemini API integration."""
 
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
-        self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
+        self.api_key = api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
         self.model_name = model or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
         self.model = None
         self._use_new_api = False
@@ -62,7 +62,7 @@ class GoogleAIService:
 
     def _init_model(self):
         if not GENAI_AVAILABLE:
-            print("[WARN] google-generativeai not installed. Run: pip install google-generativeai")
+            print("[WARN] google-genai not installed. Run: pip install google-genai")
             return
         if not self.api_key:
             print("[WARN] GOOGLE_API_KEY not set. Set via environment variable.")

@@ -9,7 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from config import get_settings
-from src.narrative import StoryGenerator
+from src.narrative import Story, StoryGenerator
 from src.audio import TTSEngine
 from src.media import ImageManager
 from src.video import VideoComposer
@@ -53,6 +53,8 @@ Examples:
     gen_parser.add_argument("--upscale", action="store_true", help="Enable Real-ESRGAN upscale when <1080p (T4)")
     gen_parser.add_argument("--transitions", choices=["crossfade", "varied"], default="crossfade", help="Concat transitions (varied opt-in)")
     gen_parser.add_argument("--gemini", action="store_true", help="Use Gemini long-form script (needs GOOGLE_API_KEY)")
+    gen_parser.add_argument("--llm", choices=["ollama", "gemini", "auto"], default=None, help="Long-form provider (ollama=qwen2.5:7b local)")
+    gen_parser.add_argument("--story-json", type=Path, default=None, help="Load pre-generated story JSON (e.g. from PC for Colab)")
 
     # Batch command
     batch_parser = subparsers.add_parser("batch", help="Generate multiple videos")
@@ -66,6 +68,7 @@ Examples:
     batch_parser.add_argument("--upscale", action="store_true", help="Enable Real-ESRGAN upscale when <1080p (T4)")
     batch_parser.add_argument("--transitions", choices=["crossfade", "varied"], default="crossfade", help="Concat transitions (varied opt-in)")
     batch_parser.add_argument("--gemini", action="store_true", help="Use Gemini long-form script (needs GOOGLE_API_KEY)")
+    batch_parser.add_argument("--llm", choices=["ollama", "gemini", "auto"], default=None, help="Long-form provider (ollama=qwen2.5:7b local)")
 
     # Test command
     test_parser = subparsers.add_parser("test", help="Test pipeline with a single scene")
@@ -86,13 +89,34 @@ async def generate_video(args, settings) -> Path:
     if settings.draft_mode:
         print("   [DRAFT] DRAFT MODE: 2 seconds per scene")
 
-    # 1. Generate story (Gemini long-form opt-in with ±10% word budget check)
+    # 1. Generate story (explicit provider only; local templates by default)
     print("\n[STORY] Generating narrative...")
     story = None
-    use_gemini = getattr(args, "gemini", False)
+    story_json = getattr(args, "story_json", None)
+    llm = getattr(args, "llm", None)
+    if getattr(args, "gemini", False) and llm is None:
+        llm = "gemini"
     target_duration = args.duration or 6.0
     num_scenes = args.scenes or 10
-    if use_gemini:
+    if story_json:
+        story = Story.load(Path(story_json))
+        words = sum(len(s.voiceover_text.split()) for s in story.scenes)
+        print(f"   [OK] Story loaded from {story_json}: {words} words, {len(story.scenes)} scenes")
+    elif llm in ("ollama", "auto"):
+        try:
+            from src.services.local_llm import OllamaStoryService, ollama_available
+            if llm == "auto" and not ollama_available():
+                print("   [INFO] Ollama not reachable, trying Gemini...")
+                llm = "gemini"
+            else:
+                story = OllamaStoryService().generate_story(
+                    theme=args.theme or "control_dichotomy",
+                    num_scenes=num_scenes, target_duration_min=target_duration,
+                )
+                llm = None
+        except Exception as exc:
+            raise SystemExit(f"[ERROR] Ollama story failed: {exc}")
+    if story is None and llm == "gemini":
         try:
             from src.services.google_ai import (
                 GoogleAIService, create_story_from_gemini,
@@ -112,9 +136,13 @@ async def generate_video(args, settings) -> Path:
                 if story_within_budget(candidate, target_duration):
                     story = candidate
                     break
-                print(f"   [WARN] Out of ±10% budget, retrying...")
+                print("   [WARN] Out of ±10% budget, retrying...")
+            if story is None:
+                raise SystemExit("[ERROR] Gemini failed or out of budget after 2 attempts. Fix key/quota, no silent fallback.")
+        except SystemExit:
+            raise
         except Exception as exc:
-            print(f"   [WARN] Gemini failed ({exc}), using local templates")
+            raise SystemExit(f"[ERROR] Gemini failed ({exc}). No silent fallback with --llm/--gemini.")
     if story is None:
         story_gen = StoryGenerator(settings)
         story = story_gen.generate(
@@ -123,7 +151,7 @@ async def generate_video(args, settings) -> Path:
             num_scenes=args.scenes,
         )
         words = sum(len(s.voiceover_text.split()) for s in story.scenes)
-        print(f"   [WARN] Local templates: {words} words — for 5-8min use --gemini (~800-900 words)")
+        print(f"   [WARN] Local templates: {words} words — for 5-8min use --llm ollama (~800-900 words)")
     print(f"   [OK] Story generated: {story.title} ({len(story.scenes)} scenes, ~{story.total_estimated_duration:.1f}s)")
 
     # 2. Generate audio + fetch images IN PARALLEL
@@ -190,6 +218,8 @@ async def batch_generate(args, settings) -> list[Path]:
             upscale = getattr(args, "upscale", False)
             transitions = getattr(args, "transitions", "crossfade")
             gemini = getattr(args, "gemini", False)
+            llm = getattr(args, "llm", None)
+            story_json = getattr(args, "story_json", None)
 
         try:
             path = await generate_video(Args(), settings)
