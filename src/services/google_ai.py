@@ -17,6 +17,7 @@ try:
     from google import genai as genai_new
     GENAI_NEW_AVAILABLE = True
 except ImportError:
+    genai_new = None
     GENAI_NEW_AVAILABLE = False
 
 # Only import the legacy SDK when the maintained SDK is unavailable.  Apart
