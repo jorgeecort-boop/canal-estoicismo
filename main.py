@@ -117,12 +117,17 @@ async def generate_video(args, settings) -> Path:
         except Exception as exc:
             raise SystemExit(f"[ERROR] Ollama story failed: {exc}")
     if story is None and llm == "gemini":
+        import os
+        if not (os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")):
+            raise SystemExit("[ERROR] Missing GOOGLE_API_KEY (or GEMINI_API_KEY). Get one free at https://aistudio.google.com/apikey then set it before --llm gemini.")
         try:
             from src.services.google_ai import (
                 GoogleAIService, create_story_from_gemini,
                 story_within_budget, story_word_count,
             )
             service = GoogleAIService()
+            if not getattr(service, "_client", None) and not service.model:
+                raise SystemExit("[ERROR] Gemini SDK not usable (pip install google-genai) or key rejected. No silent fallback.")
             for attempt in range(1, 3):
                 gemini_data = service.generate_story(
                     theme=args.theme or "control_dichotomy",
@@ -151,7 +156,7 @@ async def generate_video(args, settings) -> Path:
             num_scenes=args.scenes,
         )
         words = sum(len(s.voiceover_text.split()) for s in story.scenes)
-        print(f"   [WARN] Local templates: {words} words — for 5-8min use --llm ollama (~800-900 words)")
+        print(f"   [WARN] Local templates: {words} words — for 5-8min use --llm gemini (~800-900 words, needs key)")
     print(f"   [OK] Story generated: {story.title} ({len(story.scenes)} scenes, ~{story.total_estimated_duration:.1f}s)")
     if getattr(args, "output", None):
         story_path = Path(args.output).with_suffix(".story.json")
