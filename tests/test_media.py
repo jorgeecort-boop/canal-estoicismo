@@ -242,6 +242,17 @@ class TestSDXLLocalOptIn:
     def test_upscale_disabled_by_default(self, manager):
         assert manager.image_settings.upscale_enabled is False
 
+    def test_unload_models_frees_sdxl(self, manager, capsys):
+        manager._sdxl_pipeline = object()
+        manager.unload_models()
+        assert manager._sdxl_pipeline is None
+        assert "unloaded" in capsys.readouterr().out
+
+    def test_unload_models_noop_when_empty(self, manager):
+        manager._sdxl_pipeline = None
+        manager.unload_models()
+        assert manager._sdxl_pipeline is None
+
 
 class TestGetImageManager:
     def test_singleton(self):

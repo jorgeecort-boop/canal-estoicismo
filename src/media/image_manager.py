@@ -78,6 +78,26 @@ class MediaManager:
         print(f"   [INFO] SDXL loaded once: {cfg.sdxl_model}")
         return pipe
 
+    def unload_models(self) -> None:
+        """Release heavy generative models (SDXL ~7GB) before video compose.
+
+        Prevents the Linux OOM killer on 12GB Colab runtimes: images are
+        already on disk, so the pipeline is dead weight during MoviePy/FFmpeg.
+        """
+        if self._sdxl_pipeline is not None:
+            del self._sdxl_pipeline
+            self._sdxl_pipeline = None
+            try:
+                import gc
+                import torch
+
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
+            print("   [INFO] SDXL unloaded, memory freed for compose")
+
     def _generate_sdxl_local(self, prompt: str, scene_id: int) -> Optional[ImageAsset]:
         """Generate 16:9 image with SDXL-Turbo (2-4 steps, seed per scene)."""
         cfg = self.image_settings

@@ -181,6 +181,7 @@ async def generate_video(args, settings) -> Path:
         img_manager.fetch_images_for_story_async(story, max_concurrent=image_concurrency),
     )
     print(f"   [OK] Audio + Images ready for {len(story.scenes)} scenes")
+    img_manager.unload_models()
 
     # 4. Compose video
     print("\n[VID] Composing video...")
