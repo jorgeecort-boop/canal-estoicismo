@@ -54,7 +54,7 @@ Examples:
     gen_parser.add_argument("--upscale", action="store_true", help="Enable Real-ESRGAN upscale when <1080p (T4)")
     gen_parser.add_argument("--transitions", choices=["crossfade", "varied"], default="crossfade", help="Concat transitions (varied opt-in)")
     gen_parser.add_argument("--gemini", action="store_true", help="Use Gemini long-form script (needs GOOGLE_API_KEY)")
-    gen_parser.add_argument("--llm", choices=["ollama", "gemini", "auto"], default=None, help="Long-form provider (ollama=qwen2.5:7b local)")
+    gen_parser.add_argument("--llm", choices=["ollama", "gemini", "openrouter", "nvidia", "auto"], default=None, help="Long-form provider (ollama=qwen2.5:7b local)")
     gen_parser.add_argument("--story-json", type=Path, default=None, help="Load pre-generated story JSON (e.g. from PC for Colab)")
 
     # Batch command
@@ -69,7 +69,7 @@ Examples:
     batch_parser.add_argument("--upscale", action="store_true", help="Enable Real-ESRGAN upscale when <1080p (T4)")
     batch_parser.add_argument("--transitions", choices=["crossfade", "varied"], default="crossfade", help="Concat transitions (varied opt-in)")
     batch_parser.add_argument("--gemini", action="store_true", help="Use Gemini long-form script (needs GOOGLE_API_KEY)")
-    batch_parser.add_argument("--llm", choices=["ollama", "gemini", "auto"], default=None, help="Long-form provider (ollama=qwen2.5:7b local)")
+    batch_parser.add_argument("--llm", choices=["ollama", "gemini", "openrouter", "nvidia", "auto"], default=None, help="Long-form provider (ollama=qwen2.5:7b local)")
 
     # Test command
     test_parser = subparsers.add_parser("test", help="Test pipeline with a single scene")
@@ -149,6 +149,33 @@ async def generate_video(args, settings) -> Path:
             raise
         except Exception as exc:
             raise SystemExit(f"[ERROR] Gemini failed ({exc}). No silent fallback with --llm/--gemini.")
+    if story is None and llm in ("openrouter", "nvidia", "auto"):
+        try:
+            from src.services.openai_compat import PROVIDERS, OpenAICompatStoryService
+            candidates = (
+                [llm] if llm in PROVIDERS
+                else [p for p in ("openrouter", "nvidia") if __import__("os").getenv(PROVIDERS[p]["key_env"])]
+            )
+            if not candidates and llm in PROVIDERS:
+                candidates = [llm]
+            for candidate in candidates:
+                try:
+                    story = OpenAICompatStoryService(candidate).generate_story(
+                        theme=args.theme or "control_dichotomy",
+                        num_scenes=num_scenes, target_duration_min=target_duration,
+                    )
+                    break
+                except Exception as exc:
+                    print(f"   [WARN] {candidate} failed: {exc}")
+                    continue
+            if story is None:
+                if llm in PROVIDERS:
+                    raise SystemExit(f"[ERROR] {llm} failed. No silent fallback with explicit --llm.")
+                print("   [INFO] No cloud LLM available, using local templates...")
+        except SystemExit:
+            raise
+        except Exception as exc:
+            raise SystemExit(f"[ERROR] OpenAI-compatible story failed ({exc}).")
     if story is None:
         story_gen = StoryGenerator(settings)
         story = story_gen.generate(
