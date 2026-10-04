@@ -89,6 +89,33 @@ class TestVideoComposer:
     def test_transitions_off_by_default(self, composer):
         assert composer.settings.transitions.varied is False
 
+    def test_engine_moviepy_by_default(self, composer):
+        assert composer.video_settings.engine == "moviepy"
+
+    def test_compose_ffmpeg_engine_skips_moviepy(self, composer, tmp_path):
+        from dataclasses import replace
+        from src.narrative import Scene, Story
+        settings = replace(composer.settings, video=replace(composer.video_settings, engine="ffmpeg"))
+        composer_ffmpeg = type(composer)(settings)
+        img = tmp_path / "img.jpg"
+        img.write_bytes(b"fake-img")
+        aud = tmp_path / "aud.mp3"
+        aud.write_bytes(b"fake-aud")
+        scene = Scene(1, "Overlay", "Voiceover text here", "Prompt",
+                      estimated_duration=5.0, audio_path=aud, image_path=img)
+        story = Story("theme", "Title", "Phil", [scene])
+        with patch.object(composer_ffmpeg, "_compose_scene_ffmpeg", return_value=True) as mock_ff, \
+             patch.object(composer_ffmpeg, "_apply_kenburns_and_text") as mock_mp, \
+             patch.object(composer_ffmpeg, "_concatenate_videos_ffmpeg", return_value=True), \
+             patch.object(composer_ffmpeg, "_get_video_duration", return_value=5.0):
+            out = tmp_path / "final.mp4"
+            out.write_bytes(b"x")
+            with patch.object(Path, "exists", return_value=True):
+                result = composer_ffmpeg.compose(story, output_path=out)
+        mock_ff.assert_called_once()
+        mock_mp.assert_not_called()
+        assert result.scenes_count == 1
+
     @patch("src.video.composer.subprocess.run")
     def test_get_video_duration_success(self, mock_run, composer):
         mock_run.return_value = MagicMock(returncode=0, stdout="45.5\n")

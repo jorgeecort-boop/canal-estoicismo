@@ -53,6 +53,7 @@ Examples:
     gen_parser.add_argument("--image-provider", choices=["local_assets", "sdxl_local", "pollinations"], default=None, help="Image provider (opt-in sdxl_local for T4)")
     gen_parser.add_argument("--upscale", action="store_true", help="Enable Real-ESRGAN upscale when <1080p (T4)")
     gen_parser.add_argument("--transitions", choices=["crossfade", "varied"], default="crossfade", help="Concat transitions (varied opt-in)")
+    gen_parser.add_argument("--composer", choices=["moviepy", "ffmpeg"], default="moviepy", help="Render engine (ffmpeg=low RAM, no particles)")
     gen_parser.add_argument("--gemini", action="store_true", help="Use Gemini long-form script (needs GOOGLE_API_KEY)")
     gen_parser.add_argument("--llm", choices=["ollama", "gemini", "openrouter", "nvidia", "freellmapi", "auto"], default=None, help="Long-form provider (ollama=qwen2.5:7b local)")
     gen_parser.add_argument("--story-json", type=Path, default=None, help="Load pre-generated story JSON (e.g. from PC for Colab)")
@@ -68,6 +69,7 @@ Examples:
     batch_parser.add_argument("--image-provider", choices=["local_assets", "sdxl_local", "pollinations"], default=None, help="Image provider (opt-in sdxl_local for T4)")
     batch_parser.add_argument("--upscale", action="store_true", help="Enable Real-ESRGAN upscale when <1080p (T4)")
     batch_parser.add_argument("--transitions", choices=["crossfade", "varied"], default="crossfade", help="Concat transitions (varied opt-in)")
+    batch_parser.add_argument("--composer", choices=["moviepy", "ffmpeg"], default="moviepy", help="Render engine (ffmpeg=low RAM, no particles)")
     batch_parser.add_argument("--gemini", action="store_true", help="Use Gemini long-form script (needs GOOGLE_API_KEY)")
     batch_parser.add_argument("--llm", choices=["ollama", "gemini", "openrouter", "nvidia", "freellmapi", "auto"], default=None, help="Long-form provider (ollama=qwen2.5:7b local)")
 
@@ -335,6 +337,8 @@ def main():
         settings = replace(settings, image=replace(settings.image, upscale_enabled=True))
     if getattr(args, "transitions", "crossfade") == "varied":
         settings = replace(settings, transitions=replace(settings.transitions, varied=True))
+    if getattr(args, "composer", "moviepy") == "ffmpeg":
+        settings = replace(settings, video=replace(settings.video, engine="ffmpeg"))
 
     # Run command
     try:

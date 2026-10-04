@@ -781,14 +781,24 @@ class VideoComposer:
 
             scene_output = self._temp_dir / f"scene_{scene.scene_number:03d}.mp4"
 
-            success = self._apply_kenburns_and_text(
-                Path(scene.image_path),
-                Path(scene.audio_path),
-                scene.text_overlay,
-                scene_output,
-                duration,
-                scene.scene_number,
-            )
+            if self.video_settings.engine == "ffmpeg":
+                success = self._compose_scene_ffmpeg(
+                    Path(scene.image_path),
+                    Path(scene.audio_path),
+                    scene.text_overlay,
+                    scene_output,
+                    duration,
+                    scene.scene_number,
+                )
+            else:
+                success = self._apply_kenburns_and_text(
+                    Path(scene.image_path),
+                    Path(scene.audio_path),
+                    scene.text_overlay,
+                    scene_output,
+                    duration,
+                    scene.scene_number,
+                )
 
             if not success:
                 raise RuntimeError(f"Failed to compose scene {scene.scene_number}")
@@ -799,10 +809,14 @@ class VideoComposer:
         if progress_callback:
             progress_callback(len(story.scenes), len(story.scenes), "Concatenating scenes")
 
-        # Concatenate all scenes (varied xfade opt-in, crossfade fallback)
+        # Concatenate all scenes (varied xfade opt-in, crossfade fallback).
+        # The ffmpeg engine uses stream-copy concat (hard cuts, sequential
+        # audio, minimal RAM) unless varied transitions are requested.
         transitions = getattr(self.settings, "transitions", None)
         if transitions is not None and transitions.varied:
             success = self._concatenate_videos_varied_xfade(scene_videos, output_path)
+        elif self.video_settings.engine == "ffmpeg":
+            success = self._concatenate_videos_ffmpeg(scene_videos, output_path)
         else:
             success = self._concatenate_videos(scene_videos, output_path)
         if not success:

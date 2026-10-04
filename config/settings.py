@@ -18,6 +18,10 @@ class VideoSettings:
     crf: int = 18
     audio_codec: str = "aac"
     audio_bitrate: str = "192k"
+    # Render engine: moviepy (full effects, high RAM) or ffmpeg
+    # (streaming zoompan, low RAM — no particles/parallax, hard cuts
+    # unless --transitions varied). Use ffmpeg on small Colab runtimes.
+    engine: Literal["moviepy", "ffmpeg"] = "moviepy"
 
     @property
     def resolution(self) -> tuple[int, int]:
