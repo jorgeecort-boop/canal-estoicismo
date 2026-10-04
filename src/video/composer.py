@@ -600,10 +600,28 @@ class VideoComposer:
             # Method: Use concatenate_videoclips with crossfade
             # For smooth transitions, we overlap clips slightly
             final = concatenate_videoclips(
-                clips, 
+                clips,
                 method="compose",
                 padding=-transition_duration,  # Overlap for crossfade
             )
+
+            # Narration must NOT overlap: re-join scene audios sequentially
+            # (the video crossfade above would otherwise mix 0.8s of speech).
+            try:
+                try:
+                    from moviepy import CompositeAudioClip
+                except ImportError:
+                    from moviepy.audio.AudioClip import CompositeAudioClip
+                offset = 0.0
+                audio_parts = []
+                for clip in clips:
+                    if clip.audio is not None:
+                        audio_parts.append(clip.audio.with_start(offset))
+                        offset += clip.audio.duration
+                if audio_parts:
+                    final = final.with_audio(CompositeAudioClip(audio_parts))
+            except Exception as exc:
+                print(f"   [WARN] Sequential audio join failed, keeping mixed audio: {exc}")
             
             # Alternative: Manual crossfade for more control
             # final = self._apply_crossfade_transitions(clips, transition_duration)

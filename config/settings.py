@@ -91,6 +91,9 @@ class TTSSettings:
     hf_gpu_voice: str = "es_male"
     hf_gpu_lang: str = "es"
     piper_voice: str = "es_ES-sharvard-medium"
+    # Piper alternatives (deeper): "es_MX-ald-medium" (grave mexicana).
+    # >1.0 = slower, more solemn. 1.15 ≈ philosopher pace.
+    piper_length_scale: float = 1.15
     
     # Voces alternativas para testing
     voice_alternatives: tuple = (

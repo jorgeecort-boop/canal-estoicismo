@@ -49,7 +49,9 @@ class TTSEngine:
         self._piper_voice = None
 
     def _get_cache_key(self, text: str, voice: str, rate: str, provider: Optional[str] = None) -> str:
-        """Generate cache key for text."""
+        """Generate cache key for text (includes Piper voice/speed when relevant)."""
+        if provider == "piper-cpu":
+            voice = f"{self.tts_settings.piper_voice}@{getattr(self.tts_settings, 'piper_length_scale', 1.0)}"
         content = f"{text}|{voice}|{rate}|{provider}" if provider else f"{text}|{voice}|{rate}"
         return hashlib.sha256(content.encode()).hexdigest()[:16]
 
@@ -326,8 +328,12 @@ class TTSEngine:
         voice = self._get_piper_voice()
         wav_path = output_path.with_suffix(".wav")
         try:
+            length_scale = getattr(self.tts_settings, "piper_length_scale", 1.0) or 1.0
             with wave.open(str(wav_path), "wb") as wav_file:
-                voice.synthesize_wav(text, wav_file)
+                try:
+                    voice.synthesize_wav(text, wav_file, length_scale=length_scale)
+                except TypeError:
+                    voice.synthesize_wav(text, wav_file)
 
             cmd = ["ffmpeg", "-y", "-i", str(wav_path), "-codec:a", "libmp3lame", "-q:a", "2", str(output_path)]
             proc = await asyncio.create_subprocess_exec(

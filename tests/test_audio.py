@@ -62,6 +62,16 @@ class TestTTSEngine:
         assert key1 != key3
         assert len(key1) == 16
 
+    def test_piper_defaults_solemn_pace(self, engine):
+        assert engine.tts_settings.piper_length_scale == 1.15
+
+    def test_piper_cache_key_tracks_voice_and_speed(self, engine):
+        from dataclasses import replace
+        base = engine._get_cache_key("Hola", "v", "r", "piper-cpu")
+        other_voice = replace(engine.tts_settings, piper_voice="es_MX-ald-medium")
+        engine2 = TTSEngine(replace(engine.settings, tts=other_voice))
+        assert engine2._get_cache_key("Hola", "v", "r", "piper-cpu") != base
+
     def test_get_cached_path(self, engine):
         path = engine._get_cached_path("abc123")
         assert path.name == "abc123.mp3"

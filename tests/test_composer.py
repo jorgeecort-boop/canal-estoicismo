@@ -161,6 +161,53 @@ class TestVideoComposer:
             result = composer._compose_scene_ffmpeg(img, aud, "Test", out, 5.0, 1)
             assert result is False
 
+    def test_concatenate_joins_audio_sequentially(self, composer):
+        """Narration tracks must not overlap (no 0.8s speech mixing)."""
+        import sys
+        import types
+
+        starts = []
+
+        class FakeAudio:
+            duration = 5.0
+
+            def with_start(self, offset):
+                starts.append(offset)
+                return self
+
+        class FakeClip:
+            audio = FakeAudio()
+
+            def close(self):
+                pass
+
+        final = MagicMock()
+        final.with_audio.side_effect = lambda track: final
+        final.audio = None
+
+        fake_moviepy = types.ModuleType("moviepy")
+        fake_moviepy.VideoFileClip = lambda p: FakeClip()
+        fake_moviepy.concatenate_videoclips = lambda clips, **kwargs: final
+        fake_moviepy.CompositeVideoClip = MagicMock
+        captured = {}
+
+        class FakeCompositeAudio:
+            def __init__(self, parts):
+                captured["parts"] = parts
+
+        fake_moviepy.CompositeAudioClip = FakeCompositeAudio
+
+        with tempfile.TemporaryDirectory() as tmp:
+            scene1 = Path(tmp) / "scene1.mp4"
+            scene1.write_bytes(b"fake")
+            scene2 = Path(tmp) / "scene2.mp4"
+            scene2.write_bytes(b"fake")
+            out = Path(tmp) / "final.mp4"
+            with patch.dict(sys.modules, {"moviepy": fake_moviepy}):
+                assert composer._concatenate_videos([scene1, scene2], out) is True
+        assert starts == [0.0, 5.0]
+        assert len(captured["parts"]) == 2
+
     @patch("src.video.composer.subprocess.run")
     def test_concatenate_videos_success(self, mock_run, composer):
         mock_run.return_value = MagicMock(returncode=0)

@@ -47,6 +47,7 @@ Examples:
     gen_parser.add_argument("--duration", type=float, help="Target duration in minutes")
     gen_parser.add_argument("--scenes", type=int, help="Number of scenes")
     gen_parser.add_argument("--tts", choices=["edge-tts", "hf", "hf-gpu", "piper-cpu", "gtts"], help="TTS provider")
+    gen_parser.add_argument("--piper-voice", default=None, help="Piper voice id (e.g. es_MX-ald-medium, deeper)")
     gen_parser.add_argument("--cinematic", action="store_true", help="Enable optional cinematic effects")
     gen_parser.add_argument("--visual-engine", action="store_true", help="Enable optional visual engine animation")
     gen_parser.add_argument("--image-provider", choices=["local_assets", "sdxl_local", "pollinations"], default=None, help="Image provider (opt-in sdxl_local for T4)")
@@ -290,6 +291,8 @@ def main():
     settings = get_settings(debug=args.debug, draft_mode=args.draft)
     if getattr(args, "tts", None):
         settings = replace(settings, tts=replace(settings.tts, provider=args.tts))
+    if getattr(args, "piper_voice", None):
+        settings = replace(settings, tts=replace(settings.tts, piper_voice=args.piper_voice))
     if getattr(args, "cinematic", False):
         settings = replace(settings, cine=replace(settings.cine, enabled=True))
     if getattr(args, "visual_engine", False):
