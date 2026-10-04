@@ -71,9 +71,33 @@ class TestOpenAICompat:
         service = OpenAICompatStoryService("openrouter", api_key="k")
         with patch("src.services.openai_compat.requests.post") as mock_post:
             mock_post.return_value = _ok_response(_payload(words_per_scene=10))
-            with pytest.raises(RuntimeError, match="failed after 2 attempts"):
+            with pytest.raises(RuntimeError, match="models tried"):
                 service.generate_story("control_dichotomy", num_scenes=2, target_duration_min=1.0)
-        assert mock_post.call_count == 2
+        assert mock_post.call_count == 4  # 2 attempts x (default + fallback)
+
+    def test_410_advances_to_fallback_model(self):
+        service = OpenAICompatStoryService("nvidia", api_key="k")
+        gone = MagicMock()
+        gone.status_code = 410
+        with patch("src.services.openai_compat.requests.post") as mock_post:
+            mock_post.side_effect = [gone, _ok_response(_payload())]
+            story = service.generate_story("control_dichotomy", num_scenes=2, target_duration_min=1.0)
+        assert len(story.scenes) == 2
+        models_called = [c[1]["json"]["model"] for c in mock_post.call_args_list]
+        assert models_called[0] == "meta/llama-3.3-70b-instruct"
+        assert models_called[1] == "meta/llama-3.1-70b-instruct"
+
+    def test_extra_scenes_trimmed_not_rejected(self):
+        service = OpenAICompatStoryService("openrouter", api_key="k")
+        with patch("src.services.openai_compat.requests.post") as mock_post:
+            mock_post.return_value = _ok_response(_payload(num_scenes=5))
+            story = service.generate_story("control_dichotomy", num_scenes=3, target_duration_min=1.5)
+        assert len(story.scenes) == 3
+        assert mock_post.call_count == 1
+
+    def test_nvidia_default_is_current(self):
+        service = OpenAICompatStoryService("nvidia", api_key="k")
+        assert service.model == "meta/llama-3.3-70b-instruct"
 
     def test_unknown_provider(self):
         with pytest.raises(ValueError, match="Unknown provider"):

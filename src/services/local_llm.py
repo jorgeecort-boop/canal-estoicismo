@@ -64,6 +64,18 @@ def validate_story(
     return errors
 
 
+def maybe_trim_scenes(story: Story, num_scenes: int) -> Story:
+    """Keep the first N scenes when the model returns extras (with WARN).
+
+    Models often ignore the requested scene count; trimming preserves the
+    narrative arc opening instead of discarding a usable story.
+    """
+    if len(story.scenes) > num_scenes:
+        print(f"   [WARN] Model returned {len(story.scenes)} scenes, trimming to {num_scenes}...")
+        story.scenes = story.scenes[:num_scenes]
+    return story
+
+
 class OllamaStoryService:
     """Generate long-form stoic stories with local Ollama models."""
 
@@ -113,6 +125,7 @@ class OllamaStoryService:
                 raw = self._chat(model, prompt)
                 data = _extract_json(raw)
                 story = create_story_from_gemini(StoicStoryData(**data))
+                story = maybe_trim_scenes(story, num_scenes)
                 errors = validate_story(story, num_scenes, target_duration_min)
                 if errors:
                     raise ValueError("; ".join(errors))
