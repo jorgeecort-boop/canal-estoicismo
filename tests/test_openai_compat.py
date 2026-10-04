@@ -78,3 +78,37 @@ class TestOpenAICompat:
     def test_unknown_provider(self):
         with pytest.raises(ValueError, match="Unknown provider"):
             OpenAICompatStoryService("anthropic", api_key="k")
+
+
+class TestLLMChain:
+    def test_auto_order_gemini_then_nvidia_then_openrouter(self):
+        from main import _llm_chain
+        assert _llm_chain("auto") == ["ollama", "gemini", "nvidia", "openrouter", "freellmapi"]
+
+    def test_explicit_single(self):
+        from main import _llm_chain
+        assert _llm_chain("nvidia") == ["nvidia"]
+        assert _llm_chain(None) == []
+
+    def test_freellmapi_defaults(self, monkeypatch):
+        monkeypatch.delenv("FREELLMAPI_MODEL", raising=False)
+        monkeypatch.delenv("FREELLMAPI_URL", raising=False)
+        service = OpenAICompatStoryService("freellmapi", api_key="freellmapi-test")
+        assert service.base_url == "http://localhost:3001/v1"
+        assert service.model == "auto"
+
+    def test_freellmapi_env_overrides(self, monkeypatch):
+        monkeypatch.setenv("FREELLMAPI_URL", "http://192.168.1.10:3001/v1")
+        monkeypatch.setenv("FREELLMAPI_MODEL", "qwen-test")
+        service = OpenAICompatStoryService("freellmapi", api_key="k")
+        assert service.base_url == "http://192.168.1.10:3001/v1"
+        assert service.model == "qwen-test"
+
+    def test_freellmapi_success(self):
+        service = OpenAICompatStoryService("freellmapi", api_key="k")
+        with patch("src.services.openai_compat.requests.post") as mock_post:
+            mock_post.return_value = _ok_response(_payload())
+            story = service.generate_story("control_dichotomy", num_scenes=2, target_duration_min=1.0)
+        assert len(story.scenes) == 2
+        called_url = mock_post.call_args[0][0]
+        assert called_url == "http://localhost:3001/v1/chat/completions"

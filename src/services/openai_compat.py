@@ -1,6 +1,6 @@
-"""Long-form stories via OpenAI-compatible APIs (OpenRouter, NVIDIA NIM).
+"""Long-form stories via OpenAI-compatible APIs (OpenRouter, NVIDIA NIM, FreeLLMAPI).
 
-Both expose POST {base_url}/chat/completions with OpenAI schema.
+All expose POST {base_url}/chat/completions with OpenAI schema.
 Raises loudly on failure so callers never silently fall back to short
 local templates when an explicit --llm provider was requested.
 """
@@ -36,6 +36,16 @@ PROVIDERS: dict[str, dict[str, str]] = {
         "default_model": "meta/llama-3.1-8b-instruct",
         "key_url": "https://build.nvidia.com",
     },
+    "freellmapi": {
+        # Self-hosted router (default http://localhost:3001/v1).
+        # Only reachable where the router runs (your PC, NOT Colab).
+        # Override with FREELLMAPI_URL + FREELLMAPI_MODEL.
+        "base_url": "http://localhost:3001/v1",
+        "key_env": "FREELLMAPI_API_KEY",
+        # "auto" lets the router pick across its 34 free providers.
+        "default_model": "auto",
+        "key_url": "http://localhost:3001 (Keys page header)",
+    },
 }
 
 TIMEOUT = 180
@@ -64,7 +74,9 @@ class OpenAICompatStoryService:
         )
         env_model = os.getenv(f"{provider.upper()}_MODEL", "")
         self.model = model or env_model or self.config["default_model"]
-        self.base_url = (base_url or self.config["base_url"]).rstrip("/")
+        self.base_url = (
+            base_url or os.getenv(f"{provider.upper()}_URL", "") or self.config["base_url"]
+        ).rstrip("/")
 
     def _chat(self, prompt: str) -> str:
         if not self.api_key:

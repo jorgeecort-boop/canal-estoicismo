@@ -54,7 +54,7 @@ Examples:
     gen_parser.add_argument("--upscale", action="store_true", help="Enable Real-ESRGAN upscale when <1080p (T4)")
     gen_parser.add_argument("--transitions", choices=["crossfade", "varied"], default="crossfade", help="Concat transitions (varied opt-in)")
     gen_parser.add_argument("--gemini", action="store_true", help="Use Gemini long-form script (needs GOOGLE_API_KEY)")
-    gen_parser.add_argument("--llm", choices=["ollama", "gemini", "openrouter", "nvidia", "auto"], default=None, help="Long-form provider (ollama=qwen2.5:7b local)")
+    gen_parser.add_argument("--llm", choices=["ollama", "gemini", "openrouter", "nvidia", "freellmapi", "auto"], default=None, help="Long-form provider (ollama=qwen2.5:7b local)")
     gen_parser.add_argument("--story-json", type=Path, default=None, help="Load pre-generated story JSON (e.g. from PC for Colab)")
 
     # Batch command
@@ -69,13 +69,28 @@ Examples:
     batch_parser.add_argument("--upscale", action="store_true", help="Enable Real-ESRGAN upscale when <1080p (T4)")
     batch_parser.add_argument("--transitions", choices=["crossfade", "varied"], default="crossfade", help="Concat transitions (varied opt-in)")
     batch_parser.add_argument("--gemini", action="store_true", help="Use Gemini long-form script (needs GOOGLE_API_KEY)")
-    batch_parser.add_argument("--llm", choices=["ollama", "gemini", "openrouter", "nvidia", "auto"], default=None, help="Long-form provider (ollama=qwen2.5:7b local)")
+    batch_parser.add_argument("--llm", choices=["ollama", "gemini", "openrouter", "nvidia", "freellmapi", "auto"], default=None, help="Long-form provider (ollama=qwen2.5:7b local)")
 
     # Test command
     test_parser = subparsers.add_parser("test", help="Test pipeline with a single scene")
     test_parser.add_argument("--theme", default="control_dichotomy", help="Theme to test")
 
     return parser
+
+
+# Fallback order for --llm auto: local first, then cloud by reliability.
+# NOTE: freellmapi runs on localhost (your PC) — unreachable from Colab,
+# so it goes last; a refused connection fails fast and moves on.
+LLM_AUTO_ORDER = ("ollama", "gemini", "nvidia", "openrouter", "freellmapi")
+
+
+def _llm_chain(llm: str | None) -> list[str]:
+    """Ordered provider chain for an --llm value (testable)."""
+    if llm is None:
+        return []
+    if llm == "auto":
+        return list(LLM_AUTO_ORDER)
+    return [llm]
 
 
 async def generate_video(args, settings) -> Path:
@@ -103,79 +118,68 @@ async def generate_video(args, settings) -> Path:
         story = Story.load(Path(story_json))
         words = sum(len(s.voiceover_text.split()) for s in story.scenes)
         print(f"   [OK] Story loaded from {story_json}: {words} words, {len(story.scenes)} scenes")
-    elif llm in ("ollama", "auto"):
-        try:
-            from src.services.local_llm import OllamaStoryService, ollama_available
-            if llm == "auto" and not ollama_available():
-                print("   [INFO] Ollama not reachable, trying Gemini...")
-                llm = "gemini"
-            else:
-                story = OllamaStoryService().generate_story(
-                    theme=args.theme or "control_dichotomy",
-                    num_scenes=num_scenes, target_duration_min=target_duration,
-                )
-                llm = None
-        except Exception as exc:
-            raise SystemExit(f"[ERROR] Ollama story failed: {exc}")
-    if story is None and llm == "gemini":
+    elif llm is not None:
         import os
-        if not (os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")):
-            raise SystemExit("[ERROR] Missing GOOGLE_API_KEY (or GEMINI_API_KEY). Get one free at https://aistudio.google.com/apikey then set it before --llm gemini.")
-        try:
-            from src.services.google_ai import (
-                GoogleAIService, create_story_from_gemini,
-                story_within_budget, story_word_count,
-            )
-            service = GoogleAIService()
-            if not getattr(service, "_client", None) and not service.model:
-                raise SystemExit("[ERROR] Gemini SDK not usable (pip install google-genai) or key rejected. No silent fallback.")
-            for attempt in range(1, 3):
-                gemini_data = service.generate_story(
-                    theme=args.theme or "control_dichotomy",
-                    num_scenes=num_scenes, target_duration_min=target_duration,
-                )
-                if not gemini_data:
-                    break
-                candidate = create_story_from_gemini(gemini_data)
-                words = story_word_count(candidate)
-                print(f"   Gemini attempt {attempt}: {words} words")
-                if story_within_budget(candidate, target_duration):
-                    story = candidate
-                    break
-                print("   [WARN] Out of ±10% budget, retrying...")
-            if story is None:
-                raise SystemExit("[ERROR] Gemini failed or out of budget after 2 attempts. Fix key/quota, no silent fallback.")
-        except SystemExit:
-            raise
-        except Exception as exc:
-            raise SystemExit(f"[ERROR] Gemini failed ({exc}). No silent fallback with --llm/--gemini.")
-    if story is None and llm in ("openrouter", "nvidia", "auto"):
-        try:
-            from src.services.openai_compat import PROVIDERS, OpenAICompatStoryService
-            candidates = (
-                [llm] if llm in PROVIDERS
-                else [p for p in ("openrouter", "nvidia") if __import__("os").getenv(PROVIDERS[p]["key_env"])]
-            )
-            if not candidates and llm in PROVIDERS:
-                candidates = [llm]
-            for candidate in candidates:
-                try:
-                    story = OpenAICompatStoryService(candidate).generate_story(
+        explicit = llm != "auto"
+        for provider in _llm_chain(llm):
+            try:
+                if provider == "ollama":
+                    from src.services.local_llm import OllamaStoryService, ollama_available
+                    if not ollama_available():
+                        print("   [INFO] Ollama not reachable, skipping...")
+                        continue
+                    story = OllamaStoryService().generate_story(
                         theme=args.theme or "control_dichotomy",
                         num_scenes=num_scenes, target_duration_min=target_duration,
                     )
-                    break
-                except Exception as exc:
-                    print(f"   [WARN] {candidate} failed: {exc}")
-                    continue
-            if story is None:
-                if llm in PROVIDERS:
-                    raise SystemExit(f"[ERROR] {llm} failed. No silent fallback with explicit --llm.")
-                print("   [INFO] No cloud LLM available, using local templates...")
-        except SystemExit:
-            raise
-        except Exception as exc:
-            raise SystemExit(f"[ERROR] OpenAI-compatible story failed ({exc}).")
+                elif provider == "gemini":
+                    if not (os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")):
+                        msg = "[ERROR] Missing GOOGLE_API_KEY (or GEMINI_API_KEY). Get one free at https://aistudio.google.com/apikey."
+                        if explicit:
+                            raise SystemExit(msg + " No silent fallback with explicit --llm.")
+                        print(f"   [INFO] {msg} Skipping...")
+                        continue
+                    from src.services.google_ai import (
+                        GoogleAIService, create_story_from_gemini,
+                        story_within_budget, story_word_count,
+                    )
+                    service = GoogleAIService()
+                    if not getattr(service, "_client", None) and not service.model:
+                        raise SystemExit("[ERROR] Gemini SDK not usable (pip install google-genai) or key rejected. No silent fallback.")
+                    for attempt in range(1, 3):
+                        gemini_data = service.generate_story(
+                            theme=args.theme or "control_dichotomy",
+                            num_scenes=num_scenes, target_duration_min=target_duration,
+                        )
+                        if not gemini_data:
+                            break
+                        candidate = create_story_from_gemini(gemini_data)
+                        words = story_word_count(candidate)
+                        print(f"   Gemini attempt {attempt}: {words} words")
+                        if story_within_budget(candidate, target_duration):
+                            story = candidate
+                            break
+                        print("   [WARN] Out of ±10% budget, retrying...")
+                    if story is None:
+                        raise RuntimeError("Gemini failed or out of budget after 2 attempts.")
+                else:
+                    from src.services.openai_compat import OpenAICompatStoryService
+                    story = OpenAICompatStoryService(provider).generate_story(
+                        theme=args.theme or "control_dichotomy",
+                        num_scenes=num_scenes, target_duration_min=target_duration,
+                    )
+                break  # success with this provider
+            except SystemExit:
+                raise
+            except Exception as exc:
+                print(f"   [WARN] {provider} failed: {exc}")
+                if explicit:
+                    raise SystemExit(f"[ERROR] {provider} failed. No silent fallback with explicit --llm.")
+                continue
+        if story is None and explicit:
+            raise SystemExit("[ERROR] LLM provider failed. No silent fallback with explicit --llm.")
+        if story is None:
+            print("   [INFO] No LLM provider available, using local templates...")
     if story is None:
         story_gen = StoryGenerator(settings)
         story = story_gen.generate(
