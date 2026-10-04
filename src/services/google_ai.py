@@ -159,10 +159,13 @@ class GoogleAIService:
                         print(f"[WARN] Gemini {model_name} not available (404), trying next model...")
                         break
                     if "503" in message or "UNAVAILABLE" in message or "overload" in message.lower():
-                        wait = 15 * (retry + 1)
-                        print(f"[WARN] Gemini {model_name} overloaded (503), retry {retry + 1}/3 in {wait}s...")
-                        time.sleep(wait)
-                        continue
+                        if retry < 1:
+                            wait = 10 * (retry + 1)
+                            print(f"[WARN] Gemini {model_name} overloaded (503), retry {retry + 1}/2 in {wait}s...")
+                            time.sleep(wait)
+                            continue
+                        print(f"[WARN] Gemini {model_name} still overloaded, trying next model...")
+                        break
                     print(f"[ERROR] Gemini story generation failed ({model_name}): {e}")
                     break
         return None
