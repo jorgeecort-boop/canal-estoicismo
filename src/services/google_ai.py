@@ -3,8 +3,9 @@
 import os
 import json
 import asyncio
+import time
 import warnings
-from typing import Optional, List, Dict, Any
+from typing import Any, Optional
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -46,8 +47,18 @@ class StoicStoryData:
     title: str
     philosopher: str
     theme: str
-    scenes: List[Dict[str, Any]]
+    scenes: list[dict[str, Any]]
     total_estimated_duration: float
+
+
+# Model candidates in priority order. 2.5 models return 404 for new API
+# keys (Google restricts them to past users), so newer Flash models go first.
+# Override with GEMINI_MODEL="a,b,c" for a custom ordered list.
+MODEL_CANDIDATES: list[str] = [
+    "gemini-3.8-flash",
+    "gemini-3.5-flash",
+    "gemini-2.5-flash",
+]
 
 
 class GoogleAIService:
@@ -55,7 +66,14 @@ class GoogleAIService:
 
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
         self.api_key = api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-        self.model_name = model or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        custom = os.getenv("GEMINI_MODEL", "")
+        if model:
+            self.model_names = [model]
+        elif custom:
+            self.model_names = [m.strip() for m in custom.split(",") if m.strip()]
+        else:
+            self.model_names = list(MODEL_CANDIDATES)
+        self.model_name = self.model_names[0]
         self.model = None
         self._use_new_api = False
         self._init_model()
@@ -84,49 +102,69 @@ class GoogleAIService:
         except Exception as e:
             print(f"[ERROR] Failed to initialize Gemini: {e}")
 
+    def _generate_new_api(self, model_name: str, prompt: str) -> str:
+        """Single attempt with the new google-genai SDK."""
+        response = self._client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+            config={
+                "temperature": 0.7,
+                "top_p": 0.9,
+                "top_k": 40,
+                "max_output_tokens": 8192,
+                "response_mime_type": "application/json",
+            },
+        )
+        return response.text
+
     def generate_story(self, theme: str, num_scenes: int = 5, target_duration_min: float = 5.0) -> Optional[StoicStoryData]:
-        """Generate a stoic story using Gemini."""
+        """Generate a stoic story using Gemini.
+
+        Tries model candidates in order (404 → next model) and retries
+        transient 503/overload errors with backoff. Returns None only
+        after all candidates are exhausted.
+        """
         if not self.model and not getattr(self, '_client', None):
             return None
 
         prompt = self._build_story_prompt(theme, num_scenes, target_duration_min)
 
-        try:
-            if self._use_new_api:
-                # New google.genai API
-                response = self._client.models.generate_content(
-                    model=self.model_name,
-                    contents=prompt,
-                    config={
-                        "temperature": 0.7,
-                        "top_p": 0.9,
-                        "top_k": 40,
-                        "max_output_tokens": 8192,
-                        "response_mime_type": "application/json",
-                    }
-                )
-                response_text = response.text
-            else:
-                # Legacy google.generativeai API
-                import google.generativeai as genai
-                response = self.model.generate_content(
-                    prompt,
-                    generation_config=genai.types.GenerationConfig(
-                        temperature=0.7,
-                        top_p=0.9,
-                        top_k=40,
-                        max_output_tokens=8192,
-                        response_mime_type="application/json",
-                    )
-                )
-                response_text = response.text
-
-            if response_text:
-                data = json.loads(response_text)
-                return StoicStoryData(**data)
-        except Exception as e:
-            print(f"[ERROR] Gemini story generation failed: {e}")
-
+        models = self.model_names if self._use_new_api else [self.model_name]
+        for model_name in models:
+            for retry in range(3):
+                try:
+                    if self._use_new_api:
+                        response_text = self._generate_new_api(model_name, prompt)
+                    else:
+                        # Legacy google.generativeai API (single configured model)
+                        import google.generativeai as genai
+                        response = self.model.generate_content(
+                            prompt,
+                            generation_config=genai.types.GenerationConfig(
+                                temperature=0.7,
+                                top_p=0.9,
+                                top_k=40,
+                                max_output_tokens=8192,
+                                response_mime_type="application/json",
+                            ),
+                        )
+                        response_text = response.text
+                    if response_text:
+                        return StoicStoryData(**json.loads(response_text))
+                    print(f"[WARN] Gemini {model_name} returned empty response")
+                    break
+                except Exception as e:
+                    message = str(e)
+                    if "404" in message or "NOT_FOUND" in message:
+                        print(f"[WARN] Gemini {model_name} not available (404), trying next model...")
+                        break
+                    if "503" in message or "UNAVAILABLE" in message or "overload" in message.lower():
+                        wait = 15 * (retry + 1)
+                        print(f"[WARN] Gemini {model_name} overloaded (503), retry {retry + 1}/3 in {wait}s...")
+                        time.sleep(wait)
+                        continue
+                    print(f"[ERROR] Gemini story generation failed ({model_name}): {e}")
+                    break
         return None
 
     def _build_story_prompt(self, theme: str, num_scenes: int, target_duration_min: float) -> str:

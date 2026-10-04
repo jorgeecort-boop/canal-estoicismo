@@ -315,3 +315,74 @@ class TestGeminiWordBudget:
         assert result is not None
         assert result.title == "Control interior"
         assert result.scenes[0]["scene_number"] == 1
+
+
+class TestGeminiModelFallback:
+    def _service(self, monkeypatch, **kwargs):
+        import src.services.google_ai as google_ai
+        monkeypatch.setattr(google_ai, "GENAI_AVAILABLE", True)
+        monkeypatch.setattr(google_ai, "GENAI_NEW_AVAILABLE", True)
+        service = google_ai.GoogleAIService.__new__(google_ai.GoogleAIService)
+        service.api_key = "test-key"
+        service._use_new_api = True
+        service.model = None
+        service._client = object()
+        return service, google_ai
+
+    def test_default_candidates_start_with_new_flash(self, monkeypatch):
+        import src.services.google_ai as google_ai
+        monkeypatch.delenv("GEMINI_MODEL", raising=False)
+        service = google_ai.GoogleAIService(api_key="k")
+        assert service.model_names[0] == "gemini-3.8-flash"
+        assert "gemini-2.5-flash" in service.model_names
+
+    def test_404_falls_through_to_next_model(self, monkeypatch):
+        import json as json_module
+        service, google_ai = self._service(monkeypatch)
+        service.model_names = ["gemini-old", "gemini-new"]
+        service.model_name = "gemini-old"
+        payload = {
+            "title": "T", "philosopher": "P", "theme": "control_dichotomy",
+            "scenes": [{"scene_number": 1, "text_overlay": "O",
+                        "voiceover_text": "V", "image_prompt": "I",
+                        "estimated_duration": 5.0}],
+            "total_estimated_duration": 5.0,
+        }
+        calls = []
+
+        def fake_generate(model_name, prompt):
+            calls.append(model_name)
+            if model_name == "gemini-old":
+                raise RuntimeError("404 NOT_FOUND: model not available")
+            return json_module.dumps(payload)
+
+        monkeypatch.setattr(service, "_generate_new_api", fake_generate)
+        result = service.generate_story("control_dichotomy", 1, 1.0)
+        assert result is not None
+        assert calls == ["gemini-old", "gemini-new"]
+
+    def test_503_retries_same_model(self, monkeypatch):
+        import json as json_module
+        service, google_ai = self._service(monkeypatch)
+        service.model_names = ["gemini-x"]
+        service.model_name = "gemini-x"
+        payload = {
+            "title": "T", "philosopher": "P", "theme": "control_dichotomy",
+            "scenes": [{"scene_number": 1, "text_overlay": "O",
+                        "voiceover_text": "V", "image_prompt": "I",
+                        "estimated_duration": 5.0}],
+            "total_estimated_duration": 5.0,
+        }
+        calls = []
+
+        def fake_generate(model_name, prompt):
+            calls.append(model_name)
+            if len(calls) == 1:
+                raise RuntimeError("503 UNAVAILABLE: overloaded")
+            return json_module.dumps(payload)
+
+        monkeypatch.setattr(service, "_generate_new_api", fake_generate)
+        monkeypatch.setattr("time.sleep", lambda s: None)
+        result = service.generate_story("control_dichotomy", 1, 1.0)
+        assert result is not None
+        assert calls == ["gemini-x", "gemini-x"]
