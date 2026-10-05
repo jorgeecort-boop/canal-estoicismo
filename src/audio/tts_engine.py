@@ -110,12 +110,12 @@ class TTSEngine:
         return self._get_audio_duration(output_path)
 
     def _normalize_audio(self, audio_path: Path) -> None:
-        """Normalize audio loudness to -16 LUFS (YouTube standard) using FFmpeg loudnorm."""
+        """Normalize to -16 LUFS + gentle compression for a present narrator voice."""
         try:
             tmp_path = audio_path.with_suffix(".norm.mp3")
             cmd = [
                 "ffmpeg", "-y", "-i", str(audio_path),
-                "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
+                "-af", "loudnorm=I=-16:TP=-1.5:LRA=11,acompressor=threshold=-20dB:ratio=3:attack=10:release=150:makeup=2dB",
                 "-ar", "44100",
                 "-ab", "192k",
                 str(tmp_path),

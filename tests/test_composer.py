@@ -195,7 +195,7 @@ class TestVideoComposer:
             assert result is False
 
     def test_concatenate_joins_audio_sequentially(self, composer):
-        """Narration tracks must not overlap (no 0.8s speech mixing)."""
+        """Narration follows the video timeline (overlap discounted)."""
         import sys
         import types
 
@@ -238,7 +238,7 @@ class TestVideoComposer:
             out = Path(tmp) / "final.mp4"
             with patch.dict(sys.modules, {"moviepy": fake_moviepy}):
                 assert composer._concatenate_videos([scene1, scene2], out) is True
-        assert starts == [0.0, 5.0]
+        assert starts == [0.0, 4.2]  # 5.0s scenes minus 0.8s crossfade overlap
         assert len(captured["parts"]) == 2
 
     @patch("src.video.composer.subprocess.run")

@@ -594,8 +594,9 @@ class VideoComposer:
                 padding=-transition_duration,  # Overlap for crossfade
             )
 
-            # Narration must NOT overlap: re-join scene audios sequentially
-            # (the video crossfade above would otherwise mix 0.8s of speech).
+            # Narration must follow the VIDEO timeline: each scene starts at
+            # S_i = sum(durations) - overlap*i (crossfade), so subtract the
+            # overlap per scene. Otherwise subtitles drift 0.8s per scene.
             try:
                 try:
                     from moviepy import CompositeAudioClip
@@ -606,7 +607,7 @@ class VideoComposer:
                 for clip in clips:
                     if clip.audio is not None:
                         audio_parts.append(clip.audio.with_start(offset))
-                        offset += clip.audio.duration
+                        offset += clip.audio.duration - transition_duration
                 if audio_parts:
                     final = final.with_audio(CompositeAudioClip(audio_parts))
             except Exception as exc:
