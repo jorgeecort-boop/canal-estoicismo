@@ -386,3 +386,31 @@ class TestGeminiModelFallback:
         result = service.generate_story("control_dichotomy", 1, 1.0)
         assert result is not None
         assert calls == ["gemini-x", "gemini-x"]
+
+    def test_quota_exhausted_skips_to_next_model_without_retry(self, monkeypatch):
+        import json as json_module
+        service, google_ai = self._service(monkeypatch)
+        service.model_names = ["gemini-a", "gemini-b"]
+        service.model_name = "gemini-a"
+        payload = {
+            "title": "T", "philosopher": "P", "theme": "control_dichotomy",
+            "scenes": [{"scene_number": 1, "text_overlay": "O",
+                        "voiceover_text": "V", "image_prompt": "I",
+                        "estimated_duration": 5.0}],
+            "total_estimated_duration": 5.0,
+        }
+        calls = []
+        sleeps = []
+
+        def fake_generate(model_name, prompt):
+            calls.append(model_name)
+            if model_name == "gemini-a":
+                raise RuntimeError("429 RESOURCE_EXHAUSTED. Quota exceeded, retry in 22h.")
+            return json_module.dumps(payload)
+
+        monkeypatch.setattr(service, "_generate_new_api", fake_generate)
+        monkeypatch.setattr("time.sleep", lambda s: sleeps.append(s))
+        result = service.generate_story("control_dichotomy", 1, 1.0)
+        assert result is not None
+        assert calls == ["gemini-a", "gemini-b"]
+        assert sleeps == []

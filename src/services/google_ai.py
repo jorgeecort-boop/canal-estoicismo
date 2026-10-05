@@ -158,6 +158,9 @@ class GoogleAIService:
                     if "404" in message or "NOT_FOUND" in message:
                         print(f"[WARN] Gemini {model_name} not available (404), trying next model...")
                         break
+                    if "RESOURCE_EXHAUSTED" in message or "quota" in message.lower():
+                        print(f"[WARN] Gemini {model_name} quota exhausted, trying next model (no retry: reset in hours)...")
+                        break
                     if "503" in message or "UNAVAILABLE" in message or "overload" in message.lower():
                         if retry < 1:
                             wait = 10 * (retry + 1)
