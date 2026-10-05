@@ -452,40 +452,48 @@ class VideoComposer:
             # Fallback to FFmpeg
             return self._compose_scene_ffmpeg_fallback(image_path, audio_path, text_overlay, output_path, scene_duration, scene_number)
 
-    def _compose_scene_ffmpeg_fallback(self, image_path: Path, audio_path: Path, text_overlay: str, 
-                                        output_path: Path, scene_duration: float, scene_number: int) -> bool:
-        """Compose a single scene using FFmpeg directly (fallback)."""
-        # Build filter complex
-        kenburns = ""
+    def _build_scene_filter_complex(
+        self,
+        width: int,
+        height: int,
+        duration: float,
+        direction: str,
+        text_overlay: str,
+    ) -> str:
+        """Full per-scene filter: half-res zoompan, upscale, text, cine.
+
+        Full-res zoompan is ~4x slower (single-threaded) and times out on
+        long scenes; text stays crisp because drawtext runs after upscale.
+        """
         if self.kenburns_settings.enabled:
-            direction = self.kenburns_settings.direction
             if direction == "random":
                 import random
-                directions = ["zoom_in", "zoom_out", "pan_left", "pan_right"]
-                direction = random.choice(directions)
+                direction = random.choice(["zoom_in", "zoom_out", "pan_left", "pan_right"])
             kenburns = self._build_kenburns_filter(
-                self.video_settings.width,
-                self.video_settings.height,
-                scene_duration,
-                direction,
+                width // 2, height // 2, duration, direction,
             )
-
-        text_filter = self._build_text_filter(
-            text_overlay,
-            self.video_settings.width,
-            self.video_settings.height,
-            scene_duration,
-        )
-
-        # Combine filters
-        if kenburns:
-            filter_complex = f"[0:v]{kenburns},{text_filter}[v]"
+            text_filter = self._build_text_filter(text_overlay, width, height, duration)
+            filter_complex = f"[0:v]{kenburns},scale={width}:{height}[kb];[kb]{text_filter}[v]"
         else:
+            text_filter = self._build_text_filter(text_overlay, width, height, duration)
             filter_complex = f"[0:v]{text_filter}[v]"
 
         cine_filter = self._build_cine_filter()
         if cine_filter:
             filter_complex = filter_complex.replace("[v]", f",{cine_filter}[v]", 1)
+        return filter_complex
+
+    def _compose_scene_ffmpeg_fallback(self, image_path: Path, audio_path: Path, text_overlay: str,
+                                        output_path: Path, scene_duration: float, scene_number: int) -> bool:
+        """Compose a single scene using FFmpeg directly (fallback)."""
+        # Build filter complex
+        filter_complex = self._build_scene_filter_complex(
+            self.video_settings.width,
+            self.video_settings.height,
+            scene_duration,
+            self.kenburns_settings.direction,
+            text_overlay,
+        )
 
         cmd = [
             "ffmpeg", "-y",
@@ -508,7 +516,9 @@ class VideoComposer:
         ]
 
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            if result.returncode != 0:
+                print(f"Scene {scene_number} ffmpeg failed: {(result.stderr or '')[-500:]}")
             return result.returncode == 0
         except subprocess.TimeoutExpired:
             print(f"Scene {scene_number} composition timed out")
@@ -517,40 +527,17 @@ class VideoComposer:
             print(f"Scene {scene_number} composition failed: {e}")
             return False
 
-    def _compose_scene_ffmpeg(self, image_path: Path, audio_path: Path, text_overlay: str, 
+    def _compose_scene_ffmpeg(self, image_path: Path, audio_path: Path, text_overlay: str,
                                output_path: Path, scene_duration: float, scene_number: int) -> bool:
         """Compose a single scene using FFmpeg directly."""
-        # Build filter complex
-        kenburns = ""
-        if self.kenburns_settings.enabled:
-            direction = self.kenburns_settings.direction
-            if direction == "random":
-                import random
-                directions = ["zoom_in", "zoom_out", "pan_left", "pan_right"]
-                direction = random.choice(directions)
-            kenburns = self._build_kenburns_filter(
-                self.video_settings.width,
-                self.video_settings.height,
-                scene_duration,
-                direction,
-            )
-
-        text_filter = self._build_text_filter(
-            text_overlay,
+        # Build filter complex (shared helper: half-res zoompan + upscale)
+        filter_complex = self._build_scene_filter_complex(
             self.video_settings.width,
             self.video_settings.height,
             scene_duration,
+            self.kenburns_settings.direction,
+            text_overlay,
         )
-
-        # Combine filters
-        if kenburns:
-            filter_complex = f"[0:v]{kenburns},{text_filter}[v]"
-        else:
-            filter_complex = f"[0:v]{text_filter}[v]"
-
-        cine_filter = self._build_cine_filter()
-        if cine_filter:
-            filter_complex = filter_complex.replace("[v]", f",{cine_filter}[v]", 1)
 
         cmd = [
             "ffmpeg", "-y",
@@ -573,7 +560,9 @@ class VideoComposer:
         ]
 
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            if result.returncode != 0:
+                print(f"Scene {scene_number} ffmpeg failed: {(result.stderr or '')[-500:]}")
             return result.returncode == 0
         except subprocess.TimeoutExpired:
             print(f"Scene {scene_number} composition timed out")

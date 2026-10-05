@@ -116,6 +116,12 @@ class TestVideoComposer:
         mock_mp.assert_not_called()
         assert result.scenes_count == 1
 
+    def test_scene_filter_renders_half_res_then_upscales(self, composer):
+        fc = composer._build_scene_filter_complex(1920, 1080, 10.0, "zoom_in", "Hi")
+        assert "s=960x540" in fc  # zoompan at half resolution for speed
+        assert "scale=1920:1080" in fc  # upscale before text
+        assert fc.index("scale=1920:1080") < fc.index("drawtext")  # crisp text
+
     @patch("src.video.composer.subprocess.run")
     def test_get_video_duration_success(self, mock_run, composer):
         mock_run.return_value = MagicMock(returncode=0, stdout="45.5\n")
