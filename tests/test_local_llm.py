@@ -8,6 +8,7 @@ import pytest
 from src.narrative import Scene, Story
 from src.services.local_llm import (
     OllamaStoryService,
+    _extract_json,
     ollama_available,
     validate_story,
 )
@@ -107,3 +108,16 @@ class TestValidateStory:
         story = self._story(words=10)
         errors = validate_story(story, 2, 1.0)
         assert any("budget" in e for e in errors)
+
+
+class TestExtractJson:
+    def test_strips_markdown_fences(self):
+        raw = 'Here is your script:\n```json\n{"a": 1}\n```\nHope you like it.'
+        assert _extract_json(raw) == {"a": 1}
+
+    def test_plain_json(self):
+        assert _extract_json('{"a": 1}') == {"a": 1}
+
+    def test_no_json_raises(self):
+        with pytest.raises(ValueError, match="No JSON object"):
+            _extract_json("no braces here")

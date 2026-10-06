@@ -84,8 +84,8 @@ class TestOpenAICompat:
             story = service.generate_story("control_dichotomy", num_scenes=2, target_duration_min=1.0)
         assert len(story.scenes) == 2
         models_called = [c[1]["json"]["model"] for c in mock_post.call_args_list]
-        assert models_called[0] == "meta/llama-3.3-70b-instruct"
-        assert models_called[1] == "meta/llama-3.1-70b-instruct"
+        assert models_called[0] == "moonshotai/kimi-k2-instruct"
+        assert models_called[1] == "deepseek-ai/deepseek-v4-flash"
 
     def test_extra_scenes_trimmed_not_rejected(self):
         service = OpenAICompatStoryService("openrouter", api_key="k")
@@ -97,7 +97,7 @@ class TestOpenAICompat:
 
     def test_nvidia_default_is_current(self):
         service = OpenAICompatStoryService("nvidia", api_key="k")
-        assert service.model == "meta/llama-3.3-70b-instruct"
+        assert service.model == "moonshotai/kimi-k2-instruct"
 
     def test_unknown_provider(self):
         with pytest.raises(ValueError, match="Unknown provider"):

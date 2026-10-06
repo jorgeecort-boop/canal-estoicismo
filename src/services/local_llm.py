@@ -5,6 +5,7 @@ silently fall back to short local templates when --llm ollama was requested.
 """
 
 import json
+import re
 from typing import Optional
 
 import requests
@@ -35,7 +36,14 @@ def ollama_available(url: str = OLLAMA_CHAT_URL) -> bool:
 
 
 def _extract_json(text: str) -> dict:
-    """Extract the first {...} JSON block from model output."""
+    """Extract the first {...} JSON block from model output.
+
+    Strips markdown fences first: models often wrap JSON in
+    ```json ... ``` and stray braces in prose break naive slicing.
+    """
+    fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if fence:
+        return json.loads(fence.group(1))
     start = text.find("{")
     end = text.rfind("}")
     if start < 0 or end <= start:

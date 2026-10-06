@@ -33,10 +33,10 @@ PROVIDERS: dict[str, dict[str, str]] = {
     "nvidia": {
         "base_url": "https://integrate.api.nvidia.com/v1",
         "key_env": "NVIDIA_API_KEY",
-        # Multilingual incl. Spanish; override with NVIDIA_MODEL.
-        # 3.1-8b was retired from the hosted catalog (HTTP 410).
-        "default_model": "meta/llama-3.3-70b-instruct",
-        "fallback_models": ["meta/llama-3.1-70b-instruct"],
+        # Kimi K2: strong Spanish prose. Override with NVIDIA_MODEL.
+        # llama-3.1-* were retired from the hosted catalog (HTTP 410).
+        "default_model": "moonshotai/kimi-k2-instruct",
+        "fallback_models": ["deepseek-ai/deepseek-v4-flash", "meta/llama-3.1-70b-instruct"],
         "key_url": "https://build.nvidia.com",
     },
     "freellmapi": {
