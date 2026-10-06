@@ -89,6 +89,22 @@ class TestVideoComposer:
     def test_transitions_off_by_default(self, composer):
         assert composer.settings.transitions.varied is False
 
+    @patch("src.video.composer.subprocess.run")
+    def test_pad_scene_audio_appends_pause(self, mock_run, composer, tmp_path):
+        def _make_padded(cmd, **kwargs):
+            Path(cmd[-1]).write_bytes(b"padded")
+            return MagicMock(returncode=0)
+
+        mock_run.side_effect = _make_padded
+        src = tmp_path / "scene.mp3"
+        src.write_bytes(b"fake")
+        out = composer._pad_scene_audio(src, extra_seconds=0.6)
+        assert out.name == "scene.pad.mp3"
+        assert out.exists()
+        cmd = mock_run.call_args[0][0]
+        af = cmd[cmd.index("-af") + 1]
+        assert "apad=pad_dur=0.6" in af
+
     def test_engine_moviepy_by_default(self, composer):
         assert composer.video_settings.engine == "moviepy"
 

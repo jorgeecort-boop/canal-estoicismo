@@ -65,6 +65,30 @@ class TestTTSEngine:
     def test_piper_defaults_solemn_pace(self, engine):
         assert engine.tts_settings.piper_length_scale == 1.15
 
+    @patch("src.audio.tts_engine.subprocess.run")
+    def test_normalize_applies_gravitas_pitch_down(self, mock_run, engine, tmp_path):
+        from dataclasses import replace
+        engine2 = TTSEngine(replace(engine.settings, tts=replace(engine.tts_settings, voice_gravitas_semitones=2.0)))
+        src = tmp_path / "a.mp3"
+        src.write_bytes(b"fake")
+        mock_run.return_value = MagicMock(returncode=1)
+        engine2._normalize_audio(src)
+        cmd = mock_run.call_args[0][0]
+        af = cmd[cmd.index("-af") + 1]
+        assert "asetrate" in af and "atempo" in af and "loudnorm" in af
+
+    @patch("src.audio.tts_engine.subprocess.run")
+    def test_normalize_skips_gravitas_when_zero(self, mock_run, engine, tmp_path):
+        from dataclasses import replace
+        engine2 = TTSEngine(replace(engine.settings, tts=replace(engine.tts_settings, voice_gravitas_semitones=0.0)))
+        src = tmp_path / "a.mp3"
+        src.write_bytes(b"fake")
+        mock_run.return_value = MagicMock(returncode=1)
+        engine2._normalize_audio(src)
+        cmd = mock_run.call_args[0][0]
+        af = cmd[cmd.index("-af") + 1]
+        assert "asetrate" not in af and "loudnorm" in af
+
     def test_piper_cache_key_tracks_voice_and_speed(self, engine):
         from dataclasses import replace
         base = engine._get_cache_key("Hola", "v", "r", "piper-cpu")

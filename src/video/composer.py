@@ -121,6 +121,33 @@ class VideoComposer:
             pass
         return 0.0
 
+    def _pad_scene_audio(self, audio_path: Path, extra_seconds: float = 0.6) -> Path:
+        """Append a breathing pause so narration never runs scene-to-scene.
+
+        Returns the (possibly new) audio path. Idempotent per output name.
+        """
+        if extra_seconds <= 0:
+            return audio_path
+        padded_path = audio_path.with_name(f"{audio_path.stem}.pad{audio_path.suffix}")
+        if padded_path.exists():
+            return padded_path
+        cmd = [
+            "ffmpeg", "-y", "-i", str(audio_path),
+            "-af", f"apad=pad_dur={extra_seconds}",
+            "-c:a", self.video_settings.audio_codec,
+            "-b:a", self.video_settings.audio_bitrate,
+            str(padded_path),
+        ]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            if result.returncode == 0 and padded_path.exists():
+                return padded_path
+            print("   [WARN] Audio padding failed, using unpadded audio")
+        except Exception as exc:
+            print(f"   [WARN] Audio padding skipped: {exc}")
+        padded_path.unlink(missing_ok=True)
+        return audio_path
+
     def _create_placeholder_image(self, path: Path) -> None:
         """Create a placeholder image using PIL."""
         try:
@@ -768,6 +795,15 @@ class VideoComposer:
 
             if draft_mode or self.settings.draft_mode:
                 duration = min(duration, 2.0)
+
+            # Breathing pause between scenes (all but last): keeps subtitles
+            # aligned with narration boundaries instead of mid-sentence cuts.
+            if i < len(story.scenes) - 1:
+                padded = self._pad_scene_audio(Path(scene.audio_path))
+                if padded != Path(scene.audio_path):
+                    scene.audio_path = padded
+                    duration += 0.6
+                    scene.estimated_duration = duration
 
             scene_output = self._temp_dir / f"scene_{scene.scene_number:03d}.mp4"
 

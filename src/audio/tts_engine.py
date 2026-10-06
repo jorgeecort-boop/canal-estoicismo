@@ -110,12 +110,24 @@ class TTSEngine:
         return self._get_audio_duration(output_path)
 
     def _normalize_audio(self, audio_path: Path) -> None:
-        """Normalize to -16 LUFS + gentle compression for a present narrator voice."""
+        """Normalize to -16 LUFS + presence + optional historian gravitas.
+
+        voice_gravitas_semitones lowers pitch (asetrate) while atempo
+        compensation keeps the exact duration, so scene sync is untouched.
+        """
         try:
             tmp_path = audio_path.with_suffix(".norm.mp3")
+            semitones = float(getattr(self.tts_settings, "voice_gravitas_semitones", 0.0) or 0.0)
+            filters = []
+            if semitones > 0:
+                rate = 44100
+                factor = 2 ** (semitones / 12)
+                filters.append(f"aresample={rate},asetrate={rate}*{1 / factor:.4f},aresample={rate},atempo={factor:.4f}")
+            filters.append("loudnorm=I=-16:TP=-1.5:LRA=11")
+            filters.append("acompressor=threshold=-20dB:ratio=3:attack=10:release=150:makeup=2dB")
             cmd = [
                 "ffmpeg", "-y", "-i", str(audio_path),
-                "-af", "loudnorm=I=-16:TP=-1.5:LRA=11,acompressor=threshold=-20dB:ratio=3:attack=10:release=150:makeup=2dB",
+                "-af", ",".join(filters),
                 "-ar", "44100",
                 "-ab", "192k",
                 str(tmp_path),

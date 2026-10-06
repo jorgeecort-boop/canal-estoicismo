@@ -98,6 +98,9 @@ class TTSSettings:
     # Piper alternatives (deeper): "es_MX-ald-medium" (grave mexicana).
     # >1.0 = slower, more solemn. 1.15 ≈ philosopher pace.
     piper_length_scale: float = 1.15
+    # Historian gravitas: pitch down in semitones (duration preserved).
+    # 2.0 ≈ mature narrator. 0 disables.
+    voice_gravitas_semitones: float = 2.0
     
     # Voces alternativas para testing
     voice_alternatives: tuple = (
