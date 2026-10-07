@@ -89,6 +89,19 @@ class TestTTSEngine:
         af = cmd[cmd.index("-af") + 1]
         assert "asetrate" not in af and "loudnorm" in af
 
+    @patch("src.audio.tts_engine.subprocess.run")
+    def test_normalize_includes_eq_and_14_lufs(self, mock_run, engine, tmp_path):
+        src = tmp_path / "voice.mp3"
+        src.write_bytes(b"sample")
+        mock_run.return_value = MagicMock(returncode=1)
+        engine._normalize_audio(src)
+        cmd = mock_run.call_args[0][0]
+        af = cmd[cmd.index("-af") + 1]
+        assert "highpass=f=80" in af
+        assert "equalizer=f=130" in af
+        assert "equalizer=f=3400" in af
+        assert "loudnorm=I=-14:TP=-1.0:LRA=9" in af
+
     def test_piper_cache_key_tracks_voice_and_speed(self, engine):
         from dataclasses import replace
         base = engine._get_cache_key("Hola", "v", "r", "piper-cpu")

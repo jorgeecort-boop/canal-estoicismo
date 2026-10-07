@@ -108,6 +108,39 @@ class TestVideoComposer:
     def test_engine_moviepy_by_default(self, composer):
         assert composer.video_settings.engine == "moviepy"
 
+    def test_kenburns_vertical_directions(self, composer):
+        # In vertical format (height > width), pan_up and pan_down are supported
+        kb_up = composer._build_kenburns_filter(540, 960, 5.0, direction="pan_up")
+        assert "pan_up" not in kb_up  # filter string contains expressions
+        assert "ih-ih/zoom" in kb_up
+
+        kb_down = composer._build_kenburns_filter(540, 960, 5.0, direction="pan_down")
+        assert "ih-ih/zoom" in kb_down
+
+    def test_resolve_video_codec_default(self, composer):
+        codec, preset, extra = composer._resolve_video_codec()
+        assert codec == "libx264"
+        assert preset == "slow"
+        assert extra == []
+
+    def test_resolve_video_codec_nvenc_success(self, composer):
+        from dataclasses import replace
+        c_nvenc = VideoComposer(replace(composer.settings, video=replace(composer.video_settings, nvenc=True)))
+        with patch.object(c_nvenc, "_is_nvenc_available", return_value=True):
+            codec, preset, extra = c_nvenc._resolve_video_codec()
+            assert codec == "h264_nvenc"
+            assert preset == "p5"
+            assert "-tune" in extra and "hq" in extra
+
+    def test_resolve_video_codec_nvenc_fallback(self, composer):
+        from dataclasses import replace
+        c_nvenc = VideoComposer(replace(composer.settings, video=replace(composer.video_settings, nvenc=True)))
+        with patch.object(c_nvenc, "_is_nvenc_available", return_value=False):
+            codec, preset, extra = c_nvenc._resolve_video_codec()
+            assert codec == "libx264"
+            assert preset == "slow"
+            assert extra == []
+
     def test_compose_ffmpeg_engine_skips_moviepy(self, composer, tmp_path):
         from dataclasses import replace
         from src.narrative import Scene, Story

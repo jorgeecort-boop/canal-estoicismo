@@ -45,6 +45,36 @@ class VideoComposer:
         self.visual_engine_settings = self.settings.visual_engine
         self._temp_dir = self.settings.paths.temp_dir / "video_composition"
         self._temp_dir.mkdir(parents=True, exist_ok=True)
+        self._nvenc_available: Optional[bool] = None
+
+    def _is_nvenc_available(self) -> bool:
+        """Probe FFmpeg to check if h264_nvenc encoder is compiled and functional."""
+        if self._nvenc_available is not None:
+            return self._nvenc_available
+        try:
+            cmd = ["ffmpeg", "-hide_banner", "-encoders"]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            if result.returncode == 0 and "h264_nvenc" in result.stdout:
+                # Validate hardware encoding session initialization
+                test_cmd = [
+                    "ffmpeg", "-y", "-f", "lavfi", "-i", "nullsrc=s=64x64:d=0.1",
+                    "-c:v", "h264_nvenc", "-f", "null", "-",
+                ]
+                probe = subprocess.run(test_cmd, capture_output=True, timeout=10)
+                self._nvenc_available = (probe.returncode == 0)
+                return self._nvenc_available
+        except Exception:
+            pass
+        self._nvenc_available = False
+        return False
+
+    def _resolve_video_codec(self) -> tuple[str, str, list[str]]:
+        """Resolve video codec and preset, checking for NVENC support if requested."""
+        if getattr(self.video_settings, "nvenc", False):
+            if self._is_nvenc_available():
+                return "h264_nvenc", "p5", ["-tune", "hq"]
+            print("   [INFO] h264_nvenc requested but not available in FFmpeg/hardware; falling back to libx264")
+        return self.video_settings.codec, self.video_settings.preset, []
 
     def _build_cine_filter(self) -> str:
         """Build the optional FFmpeg cinematic filter chain."""
@@ -195,7 +225,10 @@ class VideoComposer:
 
         if direction == "random":
             import random
-            direction = random.choice(["zoom_in", "zoom_out", "pan_left", "pan_right"])
+            if height > width:
+                direction = random.choice(["zoom_in", "zoom_out", "pan_up", "pan_down"])
+            else:
+                direction = random.choice(["zoom_in", "zoom_out", "pan_left", "pan_right"])
 
         if direction == "zoom_in":
             zoom_expr = f"zoom=1+({zoom}-1)*on/{total_frames}"
@@ -213,6 +246,14 @@ class VideoComposer:
             zoom_expr = f"zoom={zoom}"
             x_expr = f"x='(iw-iw/zoom)*on/{total_frames}'"
             y_expr = f"y='ih/2-(ih/zoom/2)'"
+        elif direction == "pan_up":
+            zoom_expr = f"zoom={zoom}"
+            x_expr = f"x='iw/2-(iw/zoom/2)'"
+            y_expr = f"y='(ih-ih/zoom)*(1-on/{total_frames})'"
+        elif direction == "pan_down":
+            zoom_expr = f"zoom={zoom}"
+            x_expr = f"x='iw/2-(iw/zoom/2)'"
+            y_expr = f"y='(ih-ih/zoom)*on/{total_frames}'"
         else:
             zoom_expr = f"zoom=1+({zoom}-1)*on/{total_frames}"
             x_expr = f"x='iw/2-(iw/zoom/2)'"
@@ -433,7 +474,7 @@ class VideoComposer:
                     stroke_width=self.font_settings.stroke_width,
                     font=self.font_settings.windows_font_path if os.name == 'nt' else self.font_settings.linux_font_path,
                     method='caption',
-                    size=(target_w - 200, 260),
+                    size=(max(200, target_w - 140), 380) if target_h > target_w else (target_w - 200, 260),
                 ).with_duration(scene_duration)
                 
                 # Position by the block's bottom edge.  MoviePy interprets a
@@ -460,14 +501,16 @@ class VideoComposer:
             video = video.with_audio(audio)
 
             # Write output
+            codec, preset, extra_args = self._resolve_video_codec()
             video.write_videofile(
                 str(output_path),
                 fps=self.video_settings.fps,
-                codec=self.video_settings.codec,
+                codec=codec,
                 bitrate=self.video_settings.bitrate,
                 audio_codec=self.video_settings.audio_codec,
                 audio_bitrate=self.video_settings.audio_bitrate,
-                preset=self.video_settings.preset,
+                preset=preset,
+                ffmpeg_params=extra_args if extra_args else None,
                 threads=4,
                 logger=None,
             )
@@ -495,7 +538,10 @@ class VideoComposer:
         if self.kenburns_settings.enabled:
             if direction == "random":
                 import random
-                direction = random.choice(["zoom_in", "zoom_out", "pan_left", "pan_right"])
+                if height > width:
+                    direction = random.choice(["zoom_in", "zoom_out", "pan_up", "pan_down"])
+                else:
+                    direction = random.choice(["zoom_in", "zoom_out", "pan_left", "pan_right"])
             kenburns = self._build_kenburns_filter(
                 width // 2, height // 2, duration, direction,
             )
@@ -522,6 +568,7 @@ class VideoComposer:
             text_overlay,
         )
 
+        codec, preset, extra_args = self._resolve_video_codec()
         cmd = [
             "ffmpeg", "-y",
             "-loop", "1",
@@ -530,8 +577,9 @@ class VideoComposer:
             "-filter_complex", filter_complex,
             "-map", "[v]",
             "-map", "1:a",
-            "-c:v", self.video_settings.codec,
-            "-preset", self.video_settings.preset,
+            "-c:v", codec,
+            "-preset", preset,
+            *extra_args,
             "-b:v", self.video_settings.bitrate,
             "-c:a", self.video_settings.audio_codec,
             "-b:a", self.video_settings.audio_bitrate,
@@ -566,6 +614,7 @@ class VideoComposer:
             text_overlay,
         )
 
+        codec, preset, extra_args = self._resolve_video_codec()
         cmd = [
             "ffmpeg", "-y",
             "-loop", "1",
@@ -574,8 +623,9 @@ class VideoComposer:
             "-filter_complex", filter_complex,
             "-map", "[v]",
             "-map", "1:a",
-            "-c:v", self.video_settings.codec,
-            "-preset", self.video_settings.preset,
+            "-c:v", codec,
+            "-preset", preset,
+            *extra_args,
             "-b:v", self.video_settings.bitrate,
             "-c:a", self.video_settings.audio_codec,
             "-b:a", self.video_settings.audio_bitrate,
@@ -643,14 +693,16 @@ class VideoComposer:
             # Alternative: Manual crossfade for more control
             # final = self._apply_crossfade_transitions(clips, transition_duration)
             
+            codec, preset, extra_args = self._resolve_video_codec()
             final.write_videofile(
                 str(output_path),
                 fps=self.video_settings.fps,
-                codec=self.video_settings.codec,
+                codec=codec,
                 bitrate=self.video_settings.bitrate,
                 audio_codec=self.video_settings.audio_codec,
                 audio_bitrate=self.video_settings.audio_bitrate,
-                preset=self.video_settings.preset,
+                preset=preset,
+                ffmpeg_params=extra_args if extra_args else None,
                 threads=4,
                 logger=None,
             )
@@ -725,8 +777,9 @@ class VideoComposer:
                 out = f"[ax{i}]" if i < len(scene_paths) - 1 else "[a]"
                 fc.append(f"{alabel}[{i}:a]acrossfade=d={dur}:curve=tri{out}")
                 alabel = out
+            codec, preset, extra_args = self._resolve_video_codec()
             cmd += ["-filter_complex", ";".join(fc), "-map", "[v]", "-map", "[a]",
-                    "-c:v", self.video_settings.codec, "-preset", self.video_settings.preset,
+                    "-c:v", codec, "-preset", preset, *extra_args,
                     "-pix_fmt", "yuv420p", "-c:a", self.video_settings.audio_codec, str(output_path)]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
             if result.returncode != 0:

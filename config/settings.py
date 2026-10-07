@@ -18,6 +18,8 @@ class VideoSettings:
     crf: int = 18
     audio_codec: str = "aac"
     audio_bitrate: str = "192k"
+    # Opt-in NVIDIA hardware encoding (Colab T4 / NVENC with automatic fallback)
+    nvenc: bool = False
     # Render engine: moviepy (full effects, high RAM) or ffmpeg
     # (streaming zoompan, low RAM — no particles/parallax, hard cuts
     # unless --transitions varied). Use ffmpeg on small Colab runtimes.
@@ -29,6 +31,8 @@ class VideoSettings:
 
     @property
     def aspect_ratio(self) -> str:
+        if self.height > self.width:
+            return "9:16"
         return "16:9"
 
 
@@ -66,7 +70,7 @@ class KenBurnsSettings:
     zoom_factor: float = 1.24
     duration_factor: float = 1.0
     easing: Literal["linear", "ease_in", "ease_out", "ease_in_out"] = "ease_in_out"
-    direction: Literal["zoom_in", "zoom_out", "pan_left", "pan_right", "random"] = "random"
+    direction: Literal["zoom_in", "zoom_out", "pan_left", "pan_right", "pan_up", "pan_down", "random"] = "random"
 
 
 @dataclass(frozen=True)

@@ -56,6 +56,8 @@ Examples:
     gen_parser.add_argument("--composer", choices=["moviepy", "ffmpeg"], default="moviepy", help="Render engine (ffmpeg=low RAM, no particles)")
     gen_parser.add_argument("--gemini", action="store_true", help="Use Gemini long-form script (needs GOOGLE_API_KEY)")
     gen_parser.add_argument("--llm", choices=["ollama", "gemini", "openrouter", "nvidia", "freellmapi", "auto"], default=None, help="Long-form provider (ollama=qwen2.5:7b local)")
+    gen_parser.add_argument("--format", choices=["landscape", "reel"], default="landscape", help="Video format: landscape (16:9 1920x1080) or reel (9:16 1080x1920)")
+    gen_parser.add_argument("--nvenc", action="store_true", help="Enable NVIDIA NVENC hardware encoding (opt-in for Colab T4 with fallback)")
     gen_parser.add_argument("--story-json", type=Path, default=None, help="Load pre-generated story JSON (e.g. from PC for Colab)")
 
     # Batch command
@@ -64,6 +66,8 @@ Examples:
     batch_parser.add_argument("--output-dir", type=Path, default=Path("./output"), help="Output directory")
     batch_parser.add_argument("--themes", nargs="+", help="Specific themes to use")
     batch_parser.add_argument("--tts", choices=["edge-tts", "hf", "hf-gpu", "piper-cpu", "gtts"], help="TTS provider")
+    batch_parser.add_argument("--format", choices=["landscape", "reel"], default="landscape", help="Video format: landscape (16:9) or reel (9:16)")
+    batch_parser.add_argument("--nvenc", action="store_true", help="Enable NVIDIA NVENC hardware encoding")
     batch_parser.add_argument("--cinematic", action="store_true", help="Enable optional cinematic effects")
     batch_parser.add_argument("--visual-engine", action="store_true", help="Enable optional visual engine animation")
     batch_parser.add_argument("--image-provider", choices=["local_assets", "sdxl_local", "pollinations"], default=None, help="Image provider (opt-in sdxl_local for T4)")
@@ -76,6 +80,8 @@ Examples:
     # Test command
     test_parser = subparsers.add_parser("test", help="Test pipeline with a single scene")
     test_parser.add_argument("--theme", default="control_dichotomy", help="Theme to test")
+    test_parser.add_argument("--format", choices=["landscape", "reel"], default="landscape", help="Video format: landscape (16:9) or reel (9:16)")
+    test_parser.add_argument("--nvenc", action="store_true", help="Enable NVIDIA NVENC hardware encoding")
 
     return parser
 
@@ -282,6 +288,15 @@ async def test_pipeline(args, settings) -> None:
     # Create new settings with draft mode enabled
     from config import get_settings
     settings = get_settings(draft_mode=True)
+    if getattr(args, "format", "landscape") == "reel":
+        settings = replace(
+            settings,
+            video=replace(settings.video, width=1080, height=1920),
+            image=replace(settings.image, width=1080, height=1920, sdxl_width=832, sdxl_height=1216),
+            font=replace(settings.font, size=54, margin_bottom=440, max_chars_per_line=26),
+        )
+    if getattr(args, "nvenc", False):
+        settings = replace(settings, video=replace(settings.video, nvenc=True))
 
     story_gen = StoryGenerator(settings)
     story = story_gen.generate(theme=args.theme, num_scenes=1)
@@ -339,6 +354,15 @@ def main():
         settings = replace(settings, transitions=replace(settings.transitions, varied=True))
     if getattr(args, "composer", "moviepy") == "ffmpeg":
         settings = replace(settings, video=replace(settings.video, engine="ffmpeg"))
+    if getattr(args, "format", "landscape") == "reel":
+        settings = replace(
+            settings,
+            video=replace(settings.video, width=1080, height=1920),
+            image=replace(settings.image, width=1080, height=1920, sdxl_width=832, sdxl_height=1216),
+            font=replace(settings.font, size=54, margin_bottom=440, max_chars_per_line=26),
+        )
+    if getattr(args, "nvenc", False):
+        settings = replace(settings, video=replace(settings.video, nvenc=True))
 
     # Run command
     try:

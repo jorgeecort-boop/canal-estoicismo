@@ -89,19 +89,20 @@ def setup():
     print("="*60 + "\n")
 
 
-def generate(theme="control_dichotomy", scenes=6, duration=5, output="./video_oficial_5min.mp4"):
+def generate(theme="control_dichotomy", scenes=6, duration=5, output="./video_oficial_5min.mp4", format_type="landscape", nvenc=False):
     """Run video generation after setup."""
-    step(f"Generating video — theme={theme}, scenes={scenes}, duration={duration}min")
-    run(
-        [
-            sys.executable, "main.py", "generate",
-            "--theme", theme,
-            "--scenes", str(scenes),
-            "--duration", str(duration),
-            "--output", output,
-        ],
-        cwd=PROJECT_DIR,
-    )
+    step(f"Generating video — theme={theme}, scenes={scenes}, duration={duration}min, format={format_type}")
+    cmd = [
+        sys.executable, "main.py", "generate",
+        "--theme", theme,
+        "--scenes", str(scenes),
+        "--duration", str(duration),
+        "--format", format_type,
+        "--output", output,
+    ]
+    if nvenc:
+        cmd.append("--nvenc")
+    run(cmd, cwd=PROJECT_DIR)
     print(f"\n  ✅  Video saved: {PROJECT_DIR / output}")
     # Auto-download in Colab
     try:
@@ -119,10 +120,12 @@ if __name__ == "__main__":
     parser.add_argument("--theme", default="control_dichotomy")
     parser.add_argument("--scenes", type=int, default=6)
     parser.add_argument("--duration", type=float, default=5.0)
+    parser.add_argument("--format", dest="format_type", choices=["landscape", "reel"], default="landscape", help="Video format (landscape or reel)")
+    parser.add_argument("--nvenc", action="store_true", help="Opt-in hardware NVENC encoding")
     parser.add_argument("--output", default="./video_oficial_5min.mp4")
     args = parser.parse_args()
 
     setup()
 
     if args.generate:
-        generate(args.theme, args.scenes, args.duration, args.output)
+        generate(args.theme, args.scenes, args.duration, args.output, args.format_type, args.nvenc)

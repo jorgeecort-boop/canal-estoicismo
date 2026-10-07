@@ -123,8 +123,18 @@ class TTSEngine:
                 rate = 44100
                 factor = 2 ** (semitones / 12)
                 filters.append(f"aresample={rate},asetrate={rate}*{1 / factor:.4f},aresample={rate},atempo={factor:.4f}")
-            filters.append("loudnorm=I=-16:TP=-1.5:LRA=11")
-            filters.append("acompressor=threshold=-20dB:ratio=3:attack=10:release=150:makeup=2dB")
+            # Clean rumble below 80Hz
+            filters.append("highpass=f=80")
+            # Warmth / chest resonance for stoic narrator gravitas
+            filters.append("equalizer=f=130:t=q:w=1.2:g=3.5")
+            # Vocal presence / articulation clarity on phone and mobile speakers
+            filters.append("equalizer=f=3400:t=q:w=1.0:g=2.5")
+            # Gentle de-essing to prevent harsh sibilance
+            filters.append("equalizer=f=7500:t=q:w=2.0:g=-2.0")
+            # Vocal compression for consistent presence
+            filters.append("acompressor=threshold=-18dB:ratio=3.5:attack=15:release=120:makeup=3dB")
+            # EBU R128 Loudness standard: -14 LUFS (optimal for YouTube, Reels, TikTok)
+            filters.append("loudnorm=I=-14:TP=-1.0:LRA=9")
             cmd = [
                 "ffmpeg", "-y", "-i", str(audio_path),
                 "-af", ",".join(filters),

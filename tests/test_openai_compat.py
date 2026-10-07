@@ -128,7 +128,9 @@ class TestLLMChain:
         assert service.base_url == "http://192.168.1.10:3001/v1"
         assert service.model == "qwen-test"
 
-    def test_freellmapi_success(self):
+    def test_freellmapi_success(self, monkeypatch):
+        monkeypatch.delenv("FREELLMAPI_URL", raising=False)
+        monkeypatch.delenv("FREELLMAPI_MODEL", raising=False)
         service = OpenAICompatStoryService("freellmapi", api_key="k")
         with patch("src.services.openai_compat.requests.post") as mock_post:
             mock_post.return_value = _ok_response(_payload())

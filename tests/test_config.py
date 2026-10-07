@@ -33,6 +33,12 @@ class TestVideoSettings:
     def test_aspect_ratio(self):
         s = VideoSettings()
         assert s.aspect_ratio == "16:9"
+        s_reel = VideoSettings(width=1080, height=1920)
+        assert s_reel.aspect_ratio == "9:16"
+
+    def test_nvenc_default(self):
+        s = VideoSettings()
+        assert s.nvenc is False
 
 
 class TestFontSettings:
@@ -159,3 +165,17 @@ class TestGetSettings:
             # Should be able to get new settings
             s = get_settings(root)
             assert s is not None
+
+
+class TestCLIArgs:
+    def test_format_and_nvenc_flags(self):
+        from main import create_parser
+        parser = create_parser()
+
+        args = parser.parse_args(["generate", "--format", "reel", "--nvenc"])
+        assert args.format == "reel"
+        assert args.nvenc is True
+
+        args_default = parser.parse_args(["generate"])
+        assert args_default.format == "landscape"
+        assert args_default.nvenc is False

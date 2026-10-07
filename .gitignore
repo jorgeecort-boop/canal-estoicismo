@@ -65,10 +65,8 @@ temp/tts_cache/
 *.mp3
 *.wav
 
-# Project specific - image cache
-assets/images/*_pollinations.jpg
-assets/images/*_diffusers.jpg
-assets/images/*_placeholder.jpg
+# Project specific - image cache (regenerable, never commit)
+assets/images/
 
 # Logs
 logs/
