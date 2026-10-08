@@ -63,7 +63,7 @@ class TestTTSEngine:
         assert len(key1) == 16
 
     def test_piper_defaults_solemn_pace(self, engine):
-        assert engine.tts_settings.piper_length_scale == 1.15
+        assert engine.tts_settings.piper_length_scale == 1.02
 
     @patch("src.audio.tts_engine.subprocess.run")
     def test_normalize_applies_gravitas_pitch_down(self, mock_run, engine, tmp_path):

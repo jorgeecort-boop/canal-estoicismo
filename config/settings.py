@@ -100,11 +100,12 @@ class TTSSettings:
     hf_gpu_lang: str = "es"
     piper_voice: str = "es_ES-sharvard-medium"
     # Piper alternatives (deeper): "es_MX-ald-medium" (grave mexicana).
-    # >1.0 = slower, more solemn. 1.15 ≈ philosopher pace.
-    piper_length_scale: float = 1.15
+    # >1.0 = slower. Keep this close to natural speech: solemnity comes from
+    # pitch and compression, not from stretching every syllable.
+    piper_length_scale: float = 1.02
     # Historian gravitas: pitch down in semitones (duration preserved).
     # 2.0 ≈ mature narrator. 0 disables.
-    voice_gravitas_semitones: float = 2.0
+    voice_gravitas_semitones: float = 1.5
     
     # Voces alternativas para testing
     voice_alternatives: tuple = (
@@ -115,9 +116,9 @@ class TTSSettings:
         "en-GB-RyanNeural",     # Inglés UK, maduro
     )
     
-    rate: str = "-15%"
+    rate: str = "-8%"
     volume: str = "+0%"
-    pitch: str = "-10Hz"
+    pitch: str = "-15Hz"
     language: str = "es"
 
     # gTTS settings (fallback gratis)
@@ -125,9 +126,9 @@ class TTSSettings:
     gtts_tld: str = "com.mx"  # Español mexicano
 
     # edge-tts CLI format (sin Hz para compatibilidad)
-    edge_rate: str = "-15%"
+    edge_rate: str = "-8%"
     edge_volume: str = "+0%"
-    edge_pitch: str = "-10Hz"
+    edge_pitch: str = "-15Hz"
 
 
 @dataclass(frozen=True)

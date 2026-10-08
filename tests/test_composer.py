@@ -214,6 +214,28 @@ class TestVideoComposer:
         filter_str = composer._build_text_filter("Test: 50% 'quote'", 1920, 1080, 5.0)
         assert "Test\\: 50\\% '\\''quote" in filter_str or "quote" in filter_str
 
+    def test_overlay_text_wraps_and_caps_lines(self, composer):
+        wrapped = composer._format_overlay_text(
+            "Esta frase es demasiado larga para una sola línea y debe quedar dentro del reel "
+            "aunque el texto original continúe mucho más allá del espacio disponible en pantalla"
+        )
+        lines = wrapped.splitlines()
+        assert len(lines) == 2
+        assert all(len(line) <= composer.font_settings.max_chars_per_line for line in lines)
+        assert wrapped.endswith("…")
+
+    def test_text_filter_contains_wrapped_newline(self, composer):
+        filter_str = composer._build_text_filter(
+            "Una frase larga que debe saltar de línea para no salirse del video vertical",
+            1080,
+            1920,
+            5.0,
+        )
+        # Two timed cards instead of one wrapped block
+        assert filter_str.count("drawtext=") == 2
+        assert "between(t,0.0,2.5)" in filter_str
+        assert "between(t,2.5,5.0)" in filter_str
+
     @patch("src.video.composer.subprocess.run")
     def test_compose_scene_ffmpeg_success(self, mock_run, composer):
         mock_run.return_value = MagicMock(returncode=0)

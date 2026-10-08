@@ -63,8 +63,8 @@ class TestTTSSettings:
         s = TTSSettings()
         assert s.provider == "edge-tts"
         assert s.voice == "es-MX-JorgeNeural"
-        assert s.rate == "-15%"
-        assert s.voice_gravitas_semitones == 2.0
+        assert s.rate == "-8%"
+        assert s.voice_gravitas_semitones == 1.5
 
 
 class TestImageSettings:

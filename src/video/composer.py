@@ -267,9 +267,36 @@ class VideoComposer:
         width: int,
         height: int,
         duration: float,
+        start: float = 0.0,
     ) -> str:
-        """Build FFmpeg filter for text overlay."""
-        escaped = text.replace("'", r"'\''").replace(":", r"\:").replace("%", r"\%")
+        """Build FFmpeg drawtext filter(s): one timed card per overlay half."""
+        cards = self._overlay_cards(text)
+        per_card = duration / max(1, len(cards))
+        filters = []
+        for index, card in enumerate(cards):
+            begin = start + index * per_card
+            end = start + (index + 1) * per_card
+            filters.append(self._build_single_drawtext(card, width, height, begin, end))
+        return ",".join(filters)
+
+    def _build_single_drawtext(
+        self,
+        text: str,
+        width: int,
+        height: int,
+        start: float,
+        end: float,
+    ) -> str:
+        """Build a single FFmpeg drawtext filter with a time window."""
+        # drawtext uses the escaped two-character sequence ``\\n`` for a line
+        # break.  Keeping the wrapping here makes the MoviePy and FFmpeg
+        # renderers produce the same safe subtitle layout.
+        escaped = (
+            text.replace("'", r"'\''")
+            .replace(":", r"\:")
+            .replace("%", r"\%")
+            .replace("\n", r"\n")
+        )
 
         font_size = self.font_settings.size
         font_color = self.font_settings.color.lstrip("#")
@@ -300,8 +327,49 @@ class VideoComposer:
             f"x=(w-text_w)/2:"
             f"y={y_pos}:"
             f"line_spacing={self.font_settings.line_spacing}:"
-            f"enable='between(t,0,{duration})'"
+            f"enable='between(t,{start},{end})'"
         )
+
+    def _format_overlay_text(self, text: str) -> str:
+        """Wrap and cap subtitles so they remain inside the video safe area."""
+        import textwrap
+
+        clean = " ".join(str(text or "").split())
+        if not clean:
+            return ""
+
+        width = max(12, int(self.font_settings.max_chars_per_line))
+        max_lines = max(1, int(self.font_settings.max_lines))
+        lines = textwrap.wrap(
+            clean,
+            width=width,
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
+
+        if len(lines) > max_lines:
+            lines = lines[:max_lines]
+            tail = lines[-1].rstrip(" .,:;!?…")
+            suffix = "…"
+            lines[-1] = (tail[: max(1, width - len(suffix))] + suffix).rstrip()
+
+        return "\n".join(lines)
+
+    def _overlay_cards(self, text_overlay: str) -> list[str]:
+        """Split a formatted overlay into 1-2 timed cards.
+
+        Two-line overlays become one card per line; a long single line is
+        split by words. Short phrases stay a single card (no flicker).
+        """
+        lines = self._format_overlay_text(text_overlay).split("\n")
+        lines = [line for line in lines if line.strip()]
+        if len(lines) >= 2:
+            return lines[:2]
+        if len(lines) == 1 and len(lines[0]) > 30:
+            words = lines[0].split()
+            half = max(1, len(words) // 2)
+            return [" ".join(words[:half]), " ".join(words[half:])]
+        return lines if lines else ["…"]
 
     def _ambient_fx(self, frame, t: float, scene_number: int, particles):
         """Add optional particles, smoke, and lamp-like light fluctuation."""
@@ -463,35 +531,41 @@ class VideoComposer:
             clip = VideoClip(make_frame, duration=scene_duration)
             clip.fps = self.video_settings.fps
 
-            # Add text overlay using MoviePy's TextClip
+            # Add text overlay using MoviePy's TextClip (one timed card
+            # per overlay half so subtitles move with the narration)
             try:
                 # MoviePy 2.x compatible TextClip - avoid font parameter conflict
-                txt_clip = TextClip(
-                    text=text_overlay,
-                    font_size=self.font_settings.size,
-                    color=self.font_settings.color,
-                    stroke_color=self.font_settings.stroke_color,
-                    stroke_width=self.font_settings.stroke_width,
-                    font=self.font_settings.windows_font_path if os.name == 'nt' else self.font_settings.linux_font_path,
-                    method='caption',
-                    size=(max(200, target_w - 140), 380) if target_h > target_w else (target_w - 200, 260),
-                ).with_duration(scene_duration)
-                
-                # Position by the block's bottom edge.  MoviePy interprets a
-                # numeric y position as the top of the TextClip; placing the
-                # top at ``target_h - margin_bottom`` clips multi-line text.
-                if self.font_settings.position == "bottom":
-                    y_position = max(
-                        0,
-                        target_h - self.font_settings.margin_bottom - txt_clip.h,
-                    )
-                    txt_clip = txt_clip.with_position(('center', y_position))
-                elif self.font_settings.position == "top":
-                    txt_clip = txt_clip.with_position(('center', self.font_settings.margin_bottom))
-                else:
-                    txt_clip = txt_clip.with_position(('center', 'center'))
-                
-                video = CompositeVideoClip([clip, txt_clip])
+                cards = self._overlay_cards(text_overlay)
+                per_card = scene_duration / max(1, len(cards))
+                txt_clips = []
+                for index, card in enumerate(cards):
+                    txt_clip = TextClip(
+                        text=card,
+                        font_size=self.font_settings.size,
+                        color=self.font_settings.color,
+                        stroke_color=self.font_settings.stroke_color,
+                        stroke_width=self.font_settings.stroke_width,
+                        font=self.font_settings.windows_font_path if os.name == 'nt' else self.font_settings.linux_font_path,
+                        method='caption',
+                        size=(max(200, target_w - 140), 380) if target_h > target_w else (target_w - 200, 260),
+                    ).with_duration(per_card).with_start(index * per_card)
+
+                    # Position by the block's bottom edge.  MoviePy interprets a
+                    # numeric y position as the top of the TextClip; placing the
+                    # top at ``target_h - margin_bottom`` clips multi-line text.
+                    if self.font_settings.position == "bottom":
+                        y_position = max(
+                            0,
+                            target_h - self.font_settings.margin_bottom - txt_clip.h,
+                        )
+                        txt_clip = txt_clip.with_position(('center', y_position))
+                    elif self.font_settings.position == "top":
+                        txt_clip = txt_clip.with_position(('center', self.font_settings.margin_bottom))
+                    else:
+                        txt_clip = txt_clip.with_position(('center', 'center'))
+                    txt_clips.append(txt_clip)
+
+                video = CompositeVideoClip([clip, *txt_clips])
             except Exception as e:
                 print(f"   [WARN] TextClip failed, using video without text: {e}")
                 video = clip
