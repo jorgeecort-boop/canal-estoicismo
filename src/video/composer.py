@@ -268,14 +268,23 @@ class VideoComposer:
         height: int,
         duration: float,
         start: float = 0.0,
+        subtitle_text: str | None = None,
     ) -> str:
-        """Build FFmpeg drawtext filter(s): one timed card per overlay half."""
-        cards = self._overlay_cards(text)
-        per_card = duration / max(1, len(cards))
+        """Build timed FFmpeg subtitle cards.
+
+        When the narration is available, cards are made from the spoken text
+        and their durations are proportional to their word counts. The old
+        overlay-only behaviour remains as a compatibility fallback.
+        """
+        cards = (
+            self._timed_subtitle_cards(subtitle_text, duration)
+            if subtitle_text
+            else [(card, start + index * duration / max(1, len(self._overlay_cards(text))),
+                   start + (index + 1) * duration / max(1, len(self._overlay_cards(text))))
+                  for index, card in enumerate(self._overlay_cards(text))]
+        )
         filters = []
-        for index, card in enumerate(cards):
-            begin = start + index * per_card
-            end = start + (index + 1) * per_card
+        for card, begin, end in cards:
             filters.append(self._build_single_drawtext(card, width, height, begin, end))
         return ",".join(filters)
 
@@ -371,6 +380,43 @@ class VideoComposer:
             return [" ".join(words[:half]), " ".join(words[half:])]
         return lines if lines else ["…"]
 
+    def _timed_subtitle_cards(self, narration: str, duration: float) -> list[tuple[str, float, float]]:
+        """Split narration into readable cards timed by spoken word count."""
+        import re
+
+        clean = " ".join(str(narration or "").split())
+        if not clean:
+            return [("…", 0.0, max(0.1, duration))]
+
+        max_chars = max(24, int(self.font_settings.max_chars_per_line)) * max(
+            1, int(self.font_settings.max_lines)
+        )
+        words = clean.split()
+        chunks: list[str] = []
+        current: list[str] = []
+        current_len = 0
+        for word in words:
+            projected = current_len + (1 if current else 0) + len(word)
+            current.append(word)
+            current_len = projected
+            # Keep cards short enough to read and prefer punctuation as a boundary.
+            if current_len >= max_chars or (len(current) >= 7 and re.search(r"[.!?,;:]$", word)):
+                chunks.append(" ".join(current))
+                current, current_len = [], 0
+        if current:
+            chunks.append(" ".join(current))
+
+        total_words = max(1, len(words))
+        cursor = 0.0
+        timed: list[tuple[str, float, float]] = []
+        for index, chunk in enumerate(chunks):
+            count = len(chunk.split())
+            card_duration = duration * count / total_words
+            end = duration if index == len(chunks) - 1 else cursor + card_duration
+            timed.append((self._format_overlay_text(chunk), cursor, end))
+            cursor = end
+        return timed
+
     def _ambient_fx(self, frame, t: float, scene_number: int, particles):
         """Add optional particles, smoke, and lamp-like light fluctuation."""
         if not self.visual_engine_settings.enabled:
@@ -417,8 +463,9 @@ class VideoComposer:
         alphas = rng.uniform(60.0, 120.0, count)
         return list(zip(positions[:, 0], positions[:, 1], velocities[:, 0], velocities[:, 1], radii, alphas))
 
-    def _apply_kenburns_and_text(self, image_path: Path, audio_path: Path, text_overlay: str, 
-                                  output_path: Path, scene_duration: float, scene_number: int) -> bool:
+    def _apply_kenburns_and_text(self, image_path: Path, audio_path: Path, text_overlay: str,
+                                  output_path: Path, scene_duration: float, scene_number: int,
+                                  voiceover_text: str | None = None) -> bool:
         """Apply Ken Burns effect and text overlay using MoviePy (v2.x)."""
         try:
             # MoviePy imports fix
@@ -535,10 +582,17 @@ class VideoComposer:
             # per overlay half so subtitles move with the narration)
             try:
                 # MoviePy 2.x compatible TextClip - avoid font parameter conflict
-                cards = self._overlay_cards(text_overlay)
-                per_card = scene_duration / max(1, len(cards))
+                cards = (
+                    self._timed_subtitle_cards(voiceover_text, scene_duration)
+                    if voiceover_text
+                    else [
+                        (card, index * scene_duration / max(1, len(self._overlay_cards(text_overlay))),
+                         (index + 1) * scene_duration / max(1, len(self._overlay_cards(text_overlay))))
+                        for index, card in enumerate(self._overlay_cards(text_overlay))
+                    ]
+                )
                 txt_clips = []
-                for index, card in enumerate(cards):
+                for card, start, end in cards:
                     txt_clip = TextClip(
                         text=card,
                         font_size=self.font_settings.size,
@@ -548,7 +602,7 @@ class VideoComposer:
                         font=self.font_settings.windows_font_path if os.name == 'nt' else self.font_settings.linux_font_path,
                         method='caption',
                         size=(max(200, target_w - 140), 380) if target_h > target_w else (target_w - 200, 260),
-                    ).with_duration(per_card).with_start(index * per_card)
+                    ).with_duration(max(0.05, end - start)).with_start(start)
 
                     # Position by the block's bottom edge.  MoviePy interprets a
                     # numeric y position as the top of the TextClip; placing the
@@ -594,7 +648,10 @@ class VideoComposer:
         except Exception as e:
             print(f"   [ERROR] MoviePy composition failed: {e}")
             # Fallback to FFmpeg
-            return self._compose_scene_ffmpeg_fallback(image_path, audio_path, text_overlay, output_path, scene_duration, scene_number)
+            return self._compose_scene_ffmpeg_fallback(
+                image_path, audio_path, text_overlay, output_path, scene_duration,
+                scene_number, voiceover_text,
+            )
 
     def _build_scene_filter_complex(
         self,
@@ -603,6 +660,7 @@ class VideoComposer:
         duration: float,
         direction: str,
         text_overlay: str,
+        voiceover_text: str | None = None,
     ) -> str:
         """Full per-scene filter: half-res zoompan, upscale, text, cine.
 
@@ -619,10 +677,14 @@ class VideoComposer:
             kenburns = self._build_kenburns_filter(
                 width // 2, height // 2, duration, direction,
             )
-            text_filter = self._build_text_filter(text_overlay, width, height, duration)
+            text_filter = self._build_text_filter(
+                text_overlay, width, height, duration, subtitle_text=voiceover_text,
+            )
             filter_complex = f"[0:v]{kenburns},scale={width}:{height}[kb];[kb]{text_filter}[v]"
         else:
-            text_filter = self._build_text_filter(text_overlay, width, height, duration)
+            text_filter = self._build_text_filter(
+                text_overlay, width, height, duration, subtitle_text=voiceover_text,
+            )
             filter_complex = f"[0:v]{text_filter}[v]"
 
         cine_filter = self._build_cine_filter()
@@ -631,7 +693,8 @@ class VideoComposer:
         return filter_complex
 
     def _compose_scene_ffmpeg_fallback(self, image_path: Path, audio_path: Path, text_overlay: str,
-                                        output_path: Path, scene_duration: float, scene_number: int) -> bool:
+                                        output_path: Path, scene_duration: float, scene_number: int,
+                                        voiceover_text: str | None = None) -> bool:
         """Compose a single scene using FFmpeg directly (fallback)."""
         # Build filter complex
         filter_complex = self._build_scene_filter_complex(
@@ -640,6 +703,7 @@ class VideoComposer:
             scene_duration,
             self.kenburns_settings.direction,
             text_overlay,
+            voiceover_text,
         )
 
         codec, preset, extra_args = self._resolve_video_codec()
@@ -677,7 +741,8 @@ class VideoComposer:
             return False
 
     def _compose_scene_ffmpeg(self, image_path: Path, audio_path: Path, text_overlay: str,
-                               output_path: Path, scene_duration: float, scene_number: int) -> bool:
+                               output_path: Path, scene_duration: float, scene_number: int,
+                               voiceover_text: str | None = None) -> bool:
         """Compose a single scene using FFmpeg directly."""
         # Build filter complex (shared helper: half-res zoompan + upscale)
         filter_complex = self._build_scene_filter_complex(
@@ -686,6 +751,7 @@ class VideoComposer:
             scene_duration,
             self.kenburns_settings.direction,
             text_overlay,
+            voiceover_text,
         )
 
         codec, preset, extra_args = self._resolve_video_codec()
@@ -942,6 +1008,7 @@ class VideoComposer:
                     scene_output,
                     duration,
                     scene.scene_number,
+                    scene.voiceover_text,
                 )
             else:
                 success = self._apply_kenburns_and_text(
@@ -951,6 +1018,7 @@ class VideoComposer:
                     scene_output,
                     duration,
                     scene.scene_number,
+                    scene.voiceover_text,
                 )
 
             if not success:

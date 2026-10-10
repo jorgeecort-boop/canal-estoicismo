@@ -236,6 +236,16 @@ class TestVideoComposer:
         assert "between(t,0.0,2.5)" in filter_str
         assert "between(t,2.5,5.0)" in filter_str
 
+    def test_subtitles_follow_narration_word_budget(self, composer):
+        cards = composer._timed_subtitle_cards(
+            "Primero acepta lo que ocurre. Después elige con serenidad tu respuesta.",
+            10.0,
+        )
+        assert len(cards) >= 2
+        assert cards[0][1] == 0.0
+        assert cards[-1][2] == 10.0
+        assert all(end > start for _, start, end in cards)
+
     @patch("src.video.composer.subprocess.run")
     def test_compose_scene_ffmpeg_success(self, mock_run, composer):
         mock_run.return_value = MagicMock(returncode=0)
