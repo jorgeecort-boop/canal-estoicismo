@@ -33,11 +33,26 @@ canal estoicismo/
 │   └── __init__.py
 ├── tests/                  # Suite de pruebas completa
 │   ├── conftest.py
+│   ├── test_cli.py
+│   ├── test_colab_env.py
+│   ├── test_profiles.py
 │   ├── test_config.py
 │   ├── test_narrative.py
 │   ├── test_audio.py
 │   ├── test_media.py
 │   └── test_composer.py
+├── notebooks/               # Notebooks para Colab (ver docs/COLAB_A100.md)
+│   ├── 00_entorno_A100.ipynb
+│   ├── 01_verificacion_A100.ipynb
+│   ├── 02_lote_reels.ipynb
+│   └── 03_entrega.ipynb
+├── scripts/                 # Ayudas de Colab + gate de aceptación
+│   ├── colab_env.py
+│   └── colab_check.py
+├── docs/
+│   └── COLAB_A100.md        # Arquitectura A100 y runbook
+├── tools/
+│   └── make_notebooks.py    # Regenera los .ipynb (valida sintaxis y flags)
 ├── .github/workflows/
 │   └── ci.yml              # CI/CD con lint, tests, integración
 ├── main.py                 # CLI entry point
@@ -56,31 +71,30 @@ sudo apt-get update && sudo apt-get install -y ffmpeg imagemagick
 pip install -r requirements.txt
 ```
 
-### Google Colab (GPU T4 para generación de imágenes con Diffusers SDXL)
+### Google Colab con A100 (ruta recomendada)
 
-1. **Abrir notebook nuevo** en [Google Colab](https://colab.research.google.com/)
-2. **Activar GPU T4**: `Entorno de ejecución` → `Cambiar tipo de entorno de ejecución` → `GPU T4`
-3. **Ejecutar celdas de instalación**:
+Los notebooks en [`notebooks/`](notebooks/) son la vía oficial. Cada uno se abre directamente desde GitHub y se verifica a sí mismo antes de gastar unidades:
 
-```python
-# Celda 1: Clonar e instalar dependencias
-!git clone https://github.com/TU_USUARIO/canal-estoicismo.git
-%cd canal-estoicismo
-!pip install -r requirements.txt diffusers torch accelerate transformers --quiet
+```
+00_entorno_A100.ipynb        entorno + GPU + Drive + tests + doctor
+01_verificacion_A100.ipynb   2 imágenes SDXL reales, voz y vídeo de prueba (~2 min de GPU)
+02_lote_reels.ipynb          lote de reels → Drive, con manifest verificado
+03_entrega.ipynb             verificación, ZIP y reanudación de reels cortados
 ```
 
-```python
-# Celda 2: Generar video con imágenes IA (SDXL Turbo - rápido en T4)
-!python integration_test.py --theme control_dichotomy --output ./output_colab
+Abre el primero así:
+
+```
+https://colab.research.google.com/github/jorgeecort-boop/canal-estoicismo/blob/master/notebooks/00_entorno_A100.ipynb
 ```
 
-```python
-# Celda 3: Descargar resultado
-from google.colab import files
-files.download("./output_colab/stoic_integration_control_dichotomy_*.mp4")
-```
+1. `Entorno de ejecución` → `Cambiar tipo de entorno de ejecución` → **A100 GPU**.
+2. Añade el secreto `GEMINI_API_KEY` (icono de la llave) para guiones con LLM.
+3. Ejecuta las celdas en orden.
 
-**Tiempo estimado en Colab T4**: ~2-3 minutos para video 5-8 min (SDXL Turbo 2 pasos por imagen).
+Detalles completos en **[`docs/COLAB_A100.md`](docs/COLAB_A100.md)**: arquitectura, perfiles, persistencia en Drive, modelo de coste y diagnóstico.
+
+Bootstrap alternativo de una sola celda (sin Drive, para terminal/CI): `!python setup_colab.py`.
 
 ## Uso
 

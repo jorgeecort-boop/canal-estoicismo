@@ -76,6 +76,15 @@ class VideoComposer:
             print("   [INFO] h264_nvenc requested but not available in FFmpeg/hardware; falling back to libx264")
         return self.video_settings.codec, self.video_settings.preset, []
 
+    def _encoder_threads(self) -> Optional[int]:
+        """Encoder thread count for libx264, or None to let ffmpeg decide.
+
+        ``threads=4`` protects a 2-vCPU Colab T4; a 12-vCPU A100 runtime
+        wants every core, which is what 0 in the profile means.
+        """
+        threads = getattr(self.video_settings, "threads", 4)
+        return None if not threads else int(threads)
+
     def _build_cine_filter(self) -> str:
         """Build the optional FFmpeg cinematic filter chain."""
         cine = self.settings.cine
@@ -391,6 +400,12 @@ class VideoComposer:
         max_chars = max(24, int(self.font_settings.max_chars_per_line)) * max(
             1, int(self.font_settings.max_lines)
         )
+        # Break at sentence ends as soon as a card is substantial, and never
+        # let a card grow past what the two lines can hold. The previous rule
+        # required 7 words before a punctuation break, so "…ocurre. Después…"
+        # never split and a whole 10 s narration sat in one static card.
+        min_sentence_words = 4
+        max_words_per_card = max(8, max_chars // 6)
         words = clean.split()
         chunks: list[str] = []
         current: list[str] = []
@@ -399,8 +414,12 @@ class VideoComposer:
             projected = current_len + (1 if current else 0) + len(word)
             current.append(word)
             current_len = projected
-            # Keep cards short enough to read and prefer punctuation as a boundary.
-            if current_len >= max_chars or (len(current) >= 7 and re.search(r"[.!?,;:]$", word)):
+            sentence_end = bool(re.search(r"[.!?…]$", word))
+            if (
+                current_len >= max_chars
+                or len(current) >= max_words_per_card
+                or (sentence_end and len(current) >= min_sentence_words)
+            ):
                 chunks.append(" ".join(current))
                 current, current_len = [], 0
         if current:
@@ -639,7 +658,7 @@ class VideoComposer:
                 audio_bitrate=self.video_settings.audio_bitrate,
                 preset=preset,
                 ffmpeg_params=extra_args if extra_args else None,
-                threads=4,
+                threads=self._encoder_threads(),
                 logger=None,
             )
 
@@ -843,7 +862,7 @@ class VideoComposer:
                 audio_bitrate=self.video_settings.audio_bitrate,
                 preset=preset,
                 ffmpeg_params=extra_args if extra_args else None,
-                threads=4,
+                threads=self._encoder_threads(),
                 logger=None,
             )
             for c in clips:

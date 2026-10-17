@@ -35,6 +35,24 @@ class ImageAsset:
         }
 
 
+class _SDXLStack:
+    """The SDXL pipelines that stay resident for the whole run.
+
+    One container instead of three attributes so ``unload_models`` and the
+    smoke tests have a single thing to check. On sdxl-turbo only ``base`` is
+    ever populated; ``refiner``/``img2img`` are the SDXL-full (A100) path.
+    """
+
+    __slots__ = ("torch", "base", "refiner", "img2img", "has_refiner")
+
+    def __init__(self):
+        self.torch = None
+        self.base = None
+        self.refiner = None
+        self.img2img = None
+        self.has_refiner = False
+
+
 class MediaManager:
     """Manages media assets for video generation, unifying image and placeholder generation."""
 
@@ -56,27 +74,152 @@ class MediaManager:
         self._sdxl_pipeline = None
 
     def _get_sdxl_pipeline(self):
-        """Load SDXL-Turbo once on T4 (lazy singleton)."""
+        """Load the SDXL stack once (lazy singleton).
+
+        Small GPU (T4, 16 GB): single-stage sdxl-turbo with CPU offload —
+        unchanged. Big GPU (A100, 40 GB): SDXL base + refiner kept resident,
+        because the offload round-trip is pure overhead when it all fits.
+        """
         if self._sdxl_pipeline is not None:
             return self._sdxl_pipeline
         try:
             import torch
-            from diffusers import AutoPipelineForText2Image
         except ImportError as exc:
-            raise RuntimeError("SDXL requires diffusers+torch; install requirements-gpu.txt") from exc
+            raise RuntimeError(
+                "SDXL requires diffusers+torch; install requirements-gpu.txt"
+            ) from exc
         if not torch.cuda.is_available():
-            raise RuntimeError("SDXL local requires CUDA GPU (T4)")
+            raise RuntimeError("SDXL local requires a CUDA GPU")
+
         cfg = self.image_settings
-        pipe = AutoPipelineForText2Image.from_pretrained(
-            cfg.sdxl_model, dtype=torch.float16, variant="fp16",
-        )
-        try:
-            pipe.enable_model_cpu_offload()
-        except Exception:
+        stack = _SDXLStack()
+        stack.torch = torch
+        stack.base = self._load_sdxl_pipe(cfg.sdxl_model, "text2img", torch)
+
+        # sdxl-turbo is a distilled single-stage model: there is nothing for a
+        # refiner to add, so never load one for it.
+        stack.has_refiner = bool(cfg.sdxl_refiner) and "turbo" not in cfg.sdxl_model.lower()
+        if stack.has_refiner:
+            try:
+                stack.refiner = self._load_sdxl_pipe(
+                    cfg.sdxl_refiner,
+                    "img2img",
+                    torch,
+                    shared={
+                        "text_encoder": stack.base.text_encoder,
+                        "text_encoder_2": stack.base.text_encoder_2,
+                        "vae": stack.base.vae,
+                    },
+                )
+            except Exception as exc:
+                print(f"   [WARN] SDXL refiner unavailable, base-only: {exc}")
+                stack.has_refiner = False
+
+        for pipe in (stack.base, stack.refiner):
+            if pipe is None:
+                continue
+            if cfg.sdxl_cpu_offload:
+                try:
+                    pipe.enable_model_cpu_offload()
+                    continue
+                except Exception:
+                    pass
             pipe.to("cuda")
-        self._sdxl_pipeline = pipe
-        print(f"   [INFO] SDXL loaded once: {cfg.sdxl_model}")
-        return pipe
+
+        self._sdxl_pipeline = stack
+        print(
+            f"   [INFO] SDXL ready: {cfg.sdxl_model}"
+            f"{' + refiner' if stack.has_refiner else ''}"
+            f" | {cfg.sdxl_steps} steps, guidance {cfg.sdxl_guidance},"
+            f" hires {'on' if cfg.sdxl_hires else 'off'}"
+        )
+        return stack
+
+    @staticmethod
+    def _load_sdxl_pipe(repo: str, kind: str, torch, shared: Optional[dict] = None):
+        """Load a diffusers pipeline, tolerating repos without an fp16 variant."""
+        from diffusers import (
+            AutoPipelineForImage2Image,
+            AutoPipelineForText2Image,
+        )
+
+        cls = AutoPipelineForText2Image if kind == "text2img" else AutoPipelineForImage2Image
+        kwargs = dict(torch_dtype=torch.float16, **(shared or {}))
+        last_exc: Exception | None = None
+        for variant in ("fp16", None):
+            try:
+                return cls.from_pretrained(repo, variant=variant, **kwargs)
+            except Exception as exc:
+                last_exc = exc
+        raise last_exc if last_exc else RuntimeError(f"cannot load {repo}")
+
+    def _ensure_sdxl_img2img(self, stack: "_SDXLStack"):
+        """Lazily build the hires-fix pipeline, sharing the base components.
+
+        Returns the pipeline, or ``False`` (a sentinel) once loading has
+        failed so we do not retry the download for every scene.
+        """
+        if stack.img2img is not None:
+            return stack.img2img
+        cfg = self.image_settings
+        try:
+            pipe = self._load_sdxl_pipe(
+                cfg.sdxl_model,
+                "img2img",
+                stack.torch,
+                shared={
+                    "text_encoder": stack.base.text_encoder,
+                    "text_encoder_2": stack.base.text_encoder_2,
+                    "vae": stack.base.vae,
+                },
+            )
+            if cfg.sdxl_cpu_offload:
+                try:
+                    pipe.enable_model_cpu_offload()
+                except Exception:
+                    pipe.to("cuda")
+            else:
+                pipe.to("cuda")
+            stack.img2img = pipe
+        except Exception as exc:
+            print(f"   [WARN] SDXL hires unavailable, Lanczos only: {exc}")
+            stack.img2img = False
+        return stack.img2img
+
+    def _sdxl_hires_fix(self, stack: "_SDXLStack", image, prompt: str, generator):
+        """Refine a Lanczos-upscaled image at the final canvas size.
+
+        SDXL was trained at ~1 MP, so asking for 1080x1920 in one go produces
+        duplicated limbs. Upscaling and then re-diffusing at low strength
+        ("hires fix") is the standard way to reach the canvas with real
+        detail, and it needs nothing beyond diffusers. Any failure returns
+        the plain Lanczos result rather than killing the scene.
+        """
+        cfg = self.image_settings
+        target = (cfg.width, cfg.height)
+        if not cfg.sdxl_hires or tuple(image.size) == target:
+            return image
+        upscaled = image.resize(target, Image.LANCZOS)
+        pipe = self._ensure_sdxl_img2img(stack)
+        if not pipe:
+            return upscaled
+        try:
+            strength = min(0.9, max(0.05, float(cfg.sdxl_hires_strength)))
+            # diffusers counts the *whole* schedule: only `strength` of it is
+            # actually denoised, so scale up to land on the intended steps.
+            num_steps = max(1, int(round(max(1, cfg.sdxl_hires_steps) / strength)))
+            return pipe(
+                prompt=prompt,
+                negative_prompt=cfg.negative_prompt,
+                image=upscaled,
+                strength=strength,
+                num_inference_steps=num_steps,
+                guidance_scale=cfg.sdxl_guidance,
+                generator=generator,
+            ).images[0]
+        except Exception as exc:
+            print(f"   [WARN] SDXL hires pass failed, Lanczos only: {exc}")
+            return upscaled
 
     def unload_models(self) -> None:
         """Release heavy generative models (SDXL ~7GB) before video compose.
@@ -99,29 +242,70 @@ class MediaManager:
             print("   [INFO] SDXL unloaded, memory freed for compose")
 
     def _generate_sdxl_local(self, prompt: str, scene_id: int) -> Optional[ImageAsset]:
-        """Generate 16:9 image with SDXL-Turbo (2-4 steps, seed per scene)."""
+        """Generate one scene image with the local SDXL stack.
+
+        Turbo (T4): a single 2-4 step pass. Full (A100): base → refiner →
+        hires fix at the final canvas. Seeded per scene, so re-running the
+        same story reproduces the same images.
+        """
         cfg = self.image_settings
         style_35mm = (
             "photorealistic 35mm film still, stoic aesthetic, dramatic chiaroscuro, "
             "marble texture, deep shadows, Rembrandt lighting, moody grade, highly detailed, 8k"
         )
         full_prompt = f"{prompt[:200]}, {style_35mm}"[:300]
-        cache_key = self._get_cache_key(f"{prompt}|sdxl:{scene_id}")
+        # The generation profile is part of the cache key: switching from
+        # turbo to SDXL full must never serve an image rendered by the old
+        # settings, which is exactly what a prompt-only key would do.
+        signature = (
+            f"{cfg.sdxl_model}|{cfg.sdxl_refiner}|{cfg.sdxl_steps}"
+            f"|{cfg.sdxl_guidance}|{cfg.sdxl_width}x{cfg.sdxl_height}"
+            f"|h{int(cfg.sdxl_hires)}{cfg.sdxl_hires_strength}"
+        )
+        cache_key = self._get_cache_key(f"{prompt}|sdxl:{scene_id}|{signature}")
         output_path = self._get_cached_path(cache_key)
         if self._verify_image(output_path):
             return ImageAsset(path=output_path, prompt=prompt, source="sdxl-cache",
                               width=cfg.width, height=cfg.height)
         try:
-            import torch
-            pipe = self._get_sdxl_pipeline()
-            image = pipe(
+            stack = self._get_sdxl_pipeline()
+            is_turbo = "turbo" in cfg.sdxl_model.lower()
+            steps = max(1, min(4, cfg.sdxl_steps)) if is_turbo else max(1, cfg.sdxl_steps)
+            generator = stack.torch.Generator(device="cuda").manual_seed(1000 + scene_id)
+            base_kwargs = dict(
                 prompt=full_prompt,
                 negative_prompt=cfg.negative_prompt,
-                width=cfg.sdxl_width, height=cfg.sdxl_height,
-                num_inference_steps=max(1, min(4, cfg.sdxl_steps)),
+                width=cfg.sdxl_width,
+                height=cfg.sdxl_height,
                 guidance_scale=cfg.sdxl_guidance,
-                generator=torch.Generator(device="cuda").manual_seed(1000 + scene_id),
-            ).images[0]
+                generator=generator,
+            )
+
+            if stack.has_refiner:
+                split = min(0.95, max(0.05, float(cfg.sdxl_refiner_split)))
+                # Same schedule-length trick as the hires pass: the refiner
+                # only denoises the tail after `split`, so its step count is
+                # scaled up to land on the intended number of real steps.
+                refiner_total = max(
+                    1, int(round(max(1, cfg.sdxl_refiner_steps) / (1.0 - split)))
+                )
+                latents = stack.base(
+                    num_inference_steps=steps,
+                    denoising_end=split,
+                    output_type="latent",
+                    **base_kwargs,
+                ).images
+                image = stack.refiner(
+                    prompt=full_prompt,
+                    num_inference_steps=refiner_total,
+                    denoising_start=split,
+                    image=latents,
+                    generator=generator,
+                ).images[0]
+            else:
+                image = stack.base(num_inference_steps=steps, **base_kwargs).images[0]
+
+            image = self._sdxl_hires_fix(stack, image, full_prompt, generator)
             image = image.resize((cfg.width, cfg.height), Image.LANCZOS)
             image.save(output_path, "JPEG", quality=92)
             if not self._verify_image(output_path):
@@ -281,13 +465,20 @@ class MediaManager:
         )
 
     def _maybe_upscale(self, path: Path) -> Path:
-        """Upscale to 1920x1080 only if smaller; Real-ESRGAN on CUDA, else Lanczos."""
+        """Upscale to the *configured canvas* when the image is smaller.
+
+        Real-ESRGAN on CUDA if it is importable, plain Lanczos otherwise.
+        The target is ``image.width x image.height`` — NOT a hardcoded
+        1920x1080, which silently turned every 9:16 reel into a squashed
+        landscape frame.
+        """
         if not self.image_settings.upscale_enabled:
             return path
+        target = (self.image_settings.width, self.image_settings.height)
         try:
             with Image.open(path) as img:
                 w, h = img.size
-            if w >= 1920 and h >= 1080:
+            if w >= target[0] and h >= target[1]:
                 return path
             try:
                 import torch
@@ -307,8 +498,8 @@ class MediaManager:
             except Exception as exc:
                 print(f"   [INFO] Real-ESRGAN skipped ({exc}); using Lanczos")
             with Image.open(path) as img:
-                if img.size != (1920, 1080):
-                    img.resize((1920, 1080), Image.LANCZOS).save(path, "JPEG", quality=92)
+                if img.size != target:
+                    img.resize(target, Image.LANCZOS).save(path, "JPEG", quality=92)
             # Subtle color after upscale
             with Image.open(path) as img:
                 from PIL import ImageEnhance

@@ -2,6 +2,7 @@
 
 import asyncio
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock, patch, PropertyMock
 from io import BytesIO
@@ -52,6 +53,15 @@ class TestMediaManager:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             settings = get_settings(root)
+            # Isolate the local-asset pool. `local_assets_path` defaults to the
+            # relative "assets/images", so a pytest run from the repo root picks
+            # up the real cached scene images and any test expecting a
+            # Pollinations call silently gets a local file instead.
+            empty_pool = root / "empty_assets"
+            empty_pool.mkdir(parents=True, exist_ok=True)
+            settings = replace(
+                settings, image=replace(settings.image, local_assets_path=empty_pool)
+            )
             assets_dir = settings.paths.assets_dir / "images"
             assets_dir.mkdir(parents=True, exist_ok=True)
             yield settings
@@ -216,6 +226,15 @@ class TestSDXLLocalOptIn:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             settings = get_settings(root)
+            # Isolate the local-asset pool. `local_assets_path` defaults to the
+            # relative "assets/images", so a pytest run from the repo root picks
+            # up the real cached scene images and any test expecting a
+            # Pollinations call silently gets a local file instead.
+            empty_pool = root / "empty_assets"
+            empty_pool.mkdir(parents=True, exist_ok=True)
+            settings = replace(
+                settings, image=replace(settings.image, local_assets_path=empty_pool)
+            )
             assets_dir = settings.paths.assets_dir / "images"
             assets_dir.mkdir(parents=True, exist_ok=True)
             yield settings

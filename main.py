@@ -9,6 +9,13 @@ from dataclasses import replace
 from pathlib import Path
 
 from config import get_settings
+from config.profiles import (
+    PROFILE_CHOICES,
+    apply_profile,
+    assert_a100_ready,
+    describe_profile,
+    detect_profile,
+)
 from src.narrative import Story, StoryGenerator
 from src.audio import TTSEngine
 from src.media import ImageManager
@@ -59,12 +66,15 @@ Examples:
     gen_parser.add_argument("--format", choices=["landscape", "reel"], default="landscape", help="Video format: landscape (16:9 1920x1080) or reel (9:16 1080x1920)")
     gen_parser.add_argument("--nvenc", action="store_true", help="Enable NVIDIA NVENC hardware encoding (opt-in for Colab T4 with fallback)")
     gen_parser.add_argument("--story-json", type=Path, default=None, help="Load pre-generated story JSON (e.g. from PC for Colab)")
+    gen_parser.add_argument("--profile", choices=PROFILE_CHOICES, default="auto", help="Hardware profile: auto detects the GPU (a100 = SDXL full + hires, t4 = turbo, none = keep defaults)")
 
     # Batch command
     batch_parser = subparsers.add_parser("batch", help="Generate multiple videos")
     batch_parser.add_argument("--count", type=int, default=3, help="Number of videos")
     batch_parser.add_argument("--output-dir", type=Path, default=Path("./output"), help="Output directory")
     batch_parser.add_argument("--themes", nargs="+", help="Specific themes to use")
+    batch_parser.add_argument("--duration", type=float, default=6.0, help="Target duration per video in minutes")
+    batch_parser.add_argument("--scenes", type=int, default=10, help="Scenes per video")
     batch_parser.add_argument("--tts", choices=["edge-tts", "hf", "hf-gpu", "piper-cpu", "gtts"], help="TTS provider")
     batch_parser.add_argument("--format", choices=["landscape", "reel"], default="landscape", help="Video format: landscape (16:9) or reel (9:16)")
     batch_parser.add_argument("--nvenc", action="store_true", help="Enable NVIDIA NVENC hardware encoding")
@@ -76,12 +86,23 @@ Examples:
     batch_parser.add_argument("--composer", choices=["moviepy", "ffmpeg"], default="moviepy", help="Render engine (ffmpeg=low RAM, no particles)")
     batch_parser.add_argument("--gemini", action="store_true", help="Use Gemini long-form script (needs GOOGLE_API_KEY)")
     batch_parser.add_argument("--llm", choices=["ollama", "gemini", "openrouter", "nvidia", "freellmapi", "auto"], default=None, help="Long-form provider (ollama=qwen2.5:7b local)")
+    batch_parser.add_argument("--profile", choices=PROFILE_CHOICES, default="auto", help="Hardware profile: auto detects the GPU (a100 = SDXL full + hires, t4 = turbo, none = keep defaults)")
 
     # Test command
     test_parser = subparsers.add_parser("test", help="Test pipeline with a single scene")
     test_parser.add_argument("--theme", default="control_dichotomy", help="Theme to test")
     test_parser.add_argument("--format", choices=["landscape", "reel"], default="landscape", help="Video format: landscape (16:9) or reel (9:16)")
     test_parser.add_argument("--nvenc", action="store_true", help="Enable NVIDIA NVENC hardware encoding")
+    test_parser.add_argument("--profile", choices=PROFILE_CHOICES, default="auto", help="Hardware profile: auto detects the GPU (a100 = SDXL full + hires, t4 = turbo, none = keep defaults)")
+
+    # Doctor command — the gate the Colab notebooks run before spending units
+    doctor_parser = subparsers.add_parser(
+        "doctor",
+        help="Check the environment and the effective profile (exit 1 if not ready)",
+    )
+    doctor_parser.add_argument("--format", choices=["landscape", "reel"], default="reel", help="Format to check for")
+    doctor_parser.add_argument("--profile", choices=PROFILE_CHOICES, default="auto", help="Profile to validate")
+    doctor_parser.add_argument("--image-provider", choices=["local_assets", "sdxl_local", "pollinations"], default=None, help="Image provider to assume")
 
     return parser
 
@@ -256,24 +277,28 @@ async def batch_generate(args, settings) -> list[Path]:
 
         output_path = output_dir / f"stoic_{theme}_{time.strftime('%Y%m%d_%H%M%S')}.mp4"
 
-        # Temporarily override output path
-        class Args:
-            theme = theme
-            output = output_path
-            duration = None
-            scenes = None
-            tts = getattr(args, "tts", None)
-            cinematic = getattr(args, "cinematic", False)
-            visual_engine = getattr(args, "visual_engine", False)
-            image_provider = getattr(args, "image_provider", None)
-            upscale = getattr(args, "upscale", False)
-            transitions = getattr(args, "transitions", "crossfade")
-            gemini = getattr(args, "gemini", False)
-            llm = getattr(args, "llm", None)
-            story_json = getattr(args, "story_json", None)
+        # Per-video overrides for generate_video. This used to be a throwaway
+        # `class Args` whose body did `theme = theme`, which Python resolves as a
+        # *local* of the class body — so every batch died with
+        # `NameError: name 'theme' is not defined`. A Namespace has no such trap.
+        video_args = argparse.Namespace(
+            theme=theme,
+            output=output_path,
+            duration=getattr(args, "duration", None),
+            scenes=getattr(args, "scenes", None),
+            tts=getattr(args, "tts", None),
+            cinematic=getattr(args, "cinematic", False),
+            visual_engine=getattr(args, "visual_engine", False),
+            image_provider=getattr(args, "image_provider", None),
+            upscale=getattr(args, "upscale", False),
+            transitions=getattr(args, "transitions", "crossfade"),
+            gemini=getattr(args, "gemini", False),
+            llm=getattr(args, "llm", None),
+            story_json=getattr(args, "story_json", None),
+        )
 
         try:
-            path = await generate_video(Args(), settings)
+            path = await generate_video(video_args, settings)
             results.append(path)
         except Exception as e:
             print(f"   [FAIL] Failed: {e}")
@@ -285,18 +310,10 @@ async def batch_generate(args, settings) -> list[Path]:
 async def test_pipeline(args, settings) -> None:
     """Test the full pipeline with a single scene."""
     print("[TEST] Testing pipeline...")
-    # Create new settings with draft mode enabled
-    from config import get_settings
-    settings = get_settings(draft_mode=True)
-    if getattr(args, "format", "landscape") == "reel":
-        settings = replace(
-            settings,
-            video=replace(settings.video, width=1080, height=1920),
-            image=replace(settings.image, width=1080, height=1920, sdxl_width=832, sdxl_height=1216),
-            font=replace(settings.font, size=54, margin_bottom=440, max_chars_per_line=26),
-        )
-    if getattr(args, "nvenc", False):
-        settings = replace(settings, video=replace(settings.video, nvenc=True))
+    # Draft mode on the settings main() already built. Rebuilding them from
+    # get_settings() here silently threw away every CLI override --format,
+    # --image-provider, --profile — so the "test" did not test the real run.
+    settings = replace(settings, draft_mode=True)
 
     story_gen = StoryGenerator(settings)
     story = story_gen.generate(theme=args.theme, num_scenes=1)
@@ -332,12 +349,126 @@ async def test_pipeline(args, settings) -> None:
     print("\n[OK] Pipeline test passed!")
 
 
+def doctor_command(args, settings) -> int:
+    """Print the real environment and the effective profile.
+
+    Exit code 0 = ready to spend compute units, 1 = fix something first.
+    This is the gate the Colab notebooks run before the expensive cells, so
+    a misconfiguration costs nothing instead of burning a run.
+    """
+    import platform
+    import shutil
+
+    line = "=" * 68
+    print(line)
+    print("  STOIC PIPELINE — DOCTOR")
+    print(line)
+    print(f"python        : {platform.python_version()} on {platform.system()} {platform.machine()}")
+
+    torch_ok = False
+    try:
+        import torch
+
+        print(f"torch         : {torch.__version__}")
+        if torch.cuda.is_available():
+            props = torch.cuda.get_device_properties(0)
+            print(f"cuda device   : {torch.cuda.get_device_name(0)}")
+            print(f"vram          : {props.total_memory / 1024 ** 3:.1f} GB")
+            print(f"cuda toolkit  : {torch.version.cuda}")
+            torch_ok = True
+        else:
+            print("cuda device   : NONE — torch sees no GPU")
+    except Exception as exc:
+        print(f"torch         : NOT INSTALLED ({exc})")
+
+    try:
+        import diffusers
+
+        print(f"diffusers     : {diffusers.__version__}")
+    except Exception as exc:
+        print(f"diffusers     : NOT INSTALLED ({exc})")
+
+    ffmpeg = shutil.which("ffmpeg")
+    print(f"ffmpeg        : {ffmpeg or 'NOT FOUND'}")
+    if ffmpeg:
+        try:
+            import subprocess
+
+            probe = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-encoders"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            has_nvenc = "h264_nvenc" in probe.stdout
+            print(f"h264_nvenc    : {'yes' if has_nvenc else 'no (expected on A100 — libx264 is used)'}")
+        except Exception:
+            pass
+
+    for label, path in (("/content", "/content"), ("cwd", "."), ("drive", "/content/drive")):
+        disk_path = Path(path)
+        if not disk_path.exists():
+            if label == "drive":
+                print("disk drive    : not mounted")
+            continue
+        try:
+            usage = shutil.disk_usage(path)
+            print(f"disk {label:<8}: {usage.free / 1024 ** 3:.1f} GB free of {usage.total / 1024 ** 3:.1f} GB")
+        except Exception:
+            pass
+
+    resolved = detect_profile()
+    print(f"detected      : {resolved}")
+    print("-" * 68)
+    for key, value in describe_profile(settings).items():
+        print(f"{key:<14}: {value}")
+    print("-" * 68)
+
+    # Judge the settings that are actually configured, not just the detected
+    # card: `--profile a100` on a small GPU has to fail loudly here rather
+    # than OOM twenty minutes into a batch.
+    problems: list[str] = []
+    wants_sdxl_full = bool(settings.image.sdxl_refiner) and "turbo" not in settings.image.sdxl_model.lower()
+    if wants_sdxl_full:
+        problems = assert_a100_ready(settings)
+        if resolved != "a100":
+            problems.append(
+                f"settings ask for SDXL full but the detected GPU is {resolved!r}; "
+                "base+refiner+hires needs ~24 GB of VRAM — use --profile t4 instead"
+            )
+    if settings.image.provider == "sdxl_local" and not torch_ok:
+        problems.append("image provider is sdxl_local but no CUDA GPU is visible")
+    if settings.image.provider != "sdxl_local":
+        print(
+            "   [note] image provider is "
+            f"{settings.image.provider!r}; add --image-provider sdxl_local to use the GPU"
+        )
+
+    if problems:
+        print("[FAIL] not ready:")
+        for problem in problems:
+            print(f"   - {problem}")
+        return 1
+
+    print("[PASS] environment and profile are consistent")
+    return 0
+
+
 def main():
     parser = create_parser()
     args = parser.parse_args()
 
     # Load settings
     settings = get_settings(debug=args.debug, draft_mode=args.draft)
+
+    # Profile FIRST: it sets the canvas per format and the hardware tuning
+    # (auto-detected). Every explicit flag below it still wins, so
+    # `--profile a100 --upscale` keeps the user's own choice.
+    settings = apply_profile(
+        settings,
+        getattr(args, "profile", "auto") or "auto",
+        fmt=getattr(args, "format", "landscape"),
+    )
     if getattr(args, "tts", None):
         settings = replace(settings, tts=replace(settings.tts, provider=args.tts))
     if getattr(args, "piper_voice", None):
@@ -354,18 +485,16 @@ def main():
         settings = replace(settings, transitions=replace(settings.transitions, varied=True))
     if getattr(args, "composer", "moviepy") == "ffmpeg":
         settings = replace(settings, video=replace(settings.video, engine="ffmpeg"))
-    if getattr(args, "format", "landscape") == "reel":
-        settings = replace(
-            settings,
-            video=replace(settings.video, width=1080, height=1920),
-            image=replace(settings.image, width=1080, height=1920, sdxl_width=832, sdxl_height=1216),
-            font=replace(settings.font, size=54, margin_bottom=440, max_chars_per_line=26),
-        )
+    # NOTE: the --format reel canvas used to be re-applied here, on top of the
+    # profile. It now lives only in config/profiles.py so there is exactly one
+    # definition of "reel" in the codebase.
     if getattr(args, "nvenc", False):
         settings = replace(settings, video=replace(settings.video, nvenc=True))
 
     # Run command
     try:
+        if args.command == "doctor":
+            sys.exit(doctor_command(args, settings))
         if args.command == "generate":
             asyncio.run(generate_video(args, settings))
         elif args.command == "batch":

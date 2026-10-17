@@ -24,6 +24,10 @@ class VideoSettings:
     # (streaming zoompan, low RAM — no particles/parallax, hard cuts
     # unless --transitions varied). Use ffmpeg on small Colab runtimes.
     engine: Literal["moviepy", "ffmpeg"] = "moviepy"
+    # Encoder threads. 4 is safe on small Colab runtimes; 0 lets the
+    # encoder choose, which is what a high-RAM A100 runtime wants.
+    # Note: A100/H100 have NO NVENC — --nvenc falls back to libx264.
+    threads: int = 4
 
     @property
     def resolution(self) -> tuple[int, int]:
@@ -153,9 +157,26 @@ class ImageSettings:
     sdxl_width: int = 1024
     sdxl_height: int = 576
     sdxl_guidance: float = 0.0
-    # Real-ESRGAN upscale (T4 opt-in, only when image < 1080p)
+    # Real-ESRGAN upscale (opt-in, only when image < the final canvas)
     upscale_enabled: bool = False
     upscale_model: str = "RealESRGAN_x4plus"
+    # ── SDXL full profile (A100) ─────────────────────────────────────
+    # Empty refiner = single-stage base/turbo generation. Set it to the
+    # SDXL refiner repo for the two-stage base→refiner pipeline.
+    sdxl_refiner: str = ""
+    sdxl_refiner_steps: int = 8
+    # Fraction of the schedule left to the base pass when a refiner is
+    # used (0.8 = base does 80%, refiner polishes the last 20%).
+    sdxl_refiner_split: float = 0.8
+    # Hires fix: an img2img refinement pass at the final canvas size.
+    # Removes the softness of a plain Lanczos upscale using only
+    # diffusers — no Real-ESRGAN/basicsr dependency to break Colab.
+    sdxl_hires: bool = False
+    sdxl_hires_strength: float = 0.32
+    sdxl_hires_steps: int = 12
+    # Keep the model in system RAM between passes only on small GPUs.
+    # An A100 has room to keep everything resident (much faster).
+    sdxl_cpu_offload: bool = True
 
 
 @dataclass(frozen=True)
