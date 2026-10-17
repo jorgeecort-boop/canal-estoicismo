@@ -145,8 +145,14 @@ def apply_profile(settings, profile: str = "auto", fmt: str = "landscape"):
             # A100/H100 have no NVENC block: encoding is CPU (libx264).
             # `threads=0` lets libx264 use every vCPU; `medium` is the
             # quality/speed sweet spot on 12 vCPUs at 1080x1920.
+            # `engine=ffmpeg` is the measured difference between a 7 minute
+            # reel and an unfinished one: the moviepy path rebuilds every
+            # frame in Python (Ken Burns + particles + subtitle cards) and
+            # re-encodes the whole video when concatenating, while the ffmpeg
+            # path uses native zoompan + stream-copy concat.
             video=replace(
-                settings.video, nvenc=False, preset="medium", threads=0
+                settings.video, nvenc=False, preset="medium", threads=0,
+                engine="ffmpeg",
             ),
             image=replace(settings.image, **SDXL_FULL_A100),
         )

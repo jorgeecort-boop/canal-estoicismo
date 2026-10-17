@@ -86,6 +86,21 @@ class TestApplyProfile:
         assert s.video.threads == 0
         assert s.video.preset == "medium"
 
+    def test_a100_composes_with_the_ffmpeg_engine(self, settings):
+        """Measured on a real A100 run: the moviepy composer spent >50 minutes
+        on one 6-minute reel without finishing, rebuilding every frame in
+        Python (Ken Burns, particles, subtitle cards) and re-encoding the whole
+        video when concatenating. The ffmpeg path did the same reel in 7
+        minutes with native zoompan + stream-copy concat."""
+        s = apply_profile(settings, "a100", fmt="reel")
+        assert s.video.engine == "ffmpeg"
+
+    def test_other_profiles_keep_moviepy(self, settings):
+        """Only the A100 profile optimizes for Colab units; t4/none keep the
+        full moviepy look (particles, 2.5D subject layer)."""
+        assert apply_profile(settings, "t4", fmt="reel").video.engine == "moviepy"
+        assert apply_profile(settings, "none", fmt="reel").video.engine == "moviepy"
+
     def test_a100_keeps_the_reel_canvas(self, settings):
         s = apply_profile(settings, "a100", fmt="reel")
         assert (s.video.width, s.video.height) == (1080, 1920)

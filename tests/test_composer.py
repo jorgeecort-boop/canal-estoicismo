@@ -126,11 +126,30 @@ class TestVideoComposer:
         src = tmp_path / "scene.mp3"
         src.write_bytes(b"fake")
         out = composer._pad_scene_audio(src, extra_seconds=0.6)
-        assert out.name == "scene.pad.mp3"
+        # Default audio codec is aac -> .m4a. Writing aac into a .mp3 file is
+        # what made ffmpeg fail on Colab ("Audio padding failed" per scene).
+        assert out.name == "scene.pad.m4a"
         assert out.exists()
         cmd = mock_run.call_args[0][0]
         af = cmd[cmd.index("-af") + 1]
         assert "apad=pad_dur=0.6" in af
+
+    @patch("src.video.composer.subprocess.run")
+    def test_pad_scene_audio_follows_an_mp3_codec(self, mock_run, composer, tmp_path):
+        from dataclasses import replace
+
+        def _make_padded(cmd, **kwargs):
+            Path(cmd[-1]).write_bytes(b"padded")
+            return MagicMock(returncode=0)
+
+        mock_run.side_effect = _make_padded
+        composer.video_settings = replace(
+            composer.video_settings, audio_codec="libmp3lame"
+        )
+        src = tmp_path / "scene.mp3"
+        src.write_bytes(b"fake")
+        out = composer._pad_scene_audio(src, extra_seconds=0.6)
+        assert out.name == "scene.pad.mp3"
 
     def test_engine_moviepy_by_default(self, composer):
         assert composer.video_settings.engine == "moviepy"

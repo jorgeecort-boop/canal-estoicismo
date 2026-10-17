@@ -167,7 +167,13 @@ class VideoComposer:
         """
         if extra_seconds <= 0:
             return audio_path
-        padded_path = audio_path.with_name(f"{audio_path.stem}.pad{audio_path.suffix}")
+        # The container must match the audio codec: writing the Colab default
+        # (aac) into a `.mp3` file makes ffmpeg fail, which is why every scene
+        # used to print "Audio padding failed" and the breathing pause between
+        # scenes silently disappeared.
+        codec = str(self.video_settings.audio_codec).lower()
+        container = ".mp3" if "mp3" in codec else ".m4a"
+        padded_path = audio_path.with_name(f"{audio_path.stem}.pad{container}")
         if padded_path.exists():
             return padded_path
         cmd = [
@@ -1002,6 +1008,12 @@ class VideoComposer:
             output_path = self.settings.paths.output_dir / f"stoic_{story.theme}_{timestamp}.mp4"
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if self.video_settings.engine != "moviepy" and self.visual_engine_settings.enabled:
+            print(
+                "   [INFO] visual-engine particles/2.5D are moviepy-only; the "
+                f"{self.video_settings.engine} engine renders the reel without them"
+            )
 
         scene_videos = []
         total_duration = 0.0
