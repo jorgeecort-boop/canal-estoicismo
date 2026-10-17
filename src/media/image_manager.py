@@ -285,8 +285,9 @@ class MediaManager:
         cache_key = self._get_cache_key(f"{prompt}|sdxl:{scene_id}|{signature}")
         output_path = self._get_cached_path(cache_key)
         if self._verify_image(output_path):
+            w, h = self._image_size(output_path)
             return ImageAsset(path=output_path, prompt=prompt, source="sdxl-cache",
-                              width=cfg.width, height=cfg.height)
+                              width=w, height=h)
         try:
             stack = self._get_sdxl_pipeline()
             is_turbo = "turbo" in cfg.sdxl_model.lower()
@@ -344,6 +345,21 @@ class MediaManager:
     def _get_cached_path(self, cache_key: str) -> Path:
         """Get cached image path."""
         return self._assets_dir / f"{cache_key}.jpg"
+
+    @staticmethod
+    def _image_size(path: Path) -> tuple[int, int]:
+        """Real pixel size of a cached file.
+
+        Cache hits must report what is actually on disk, not the configured
+        canvas: a 576x1024 Pollinations fallback served through the generic
+        cache once claimed to be 1080x1920 and the acceptance gate caught
+        the lie (and it is also what the run manifest should state).
+        """
+        try:
+            with Image.open(path) as img:
+                return img.size
+        except Exception:
+            return (0, 0)
 
     def _verify_image(self, path: Path) -> bool:
         """Verify if the image file is valid and not empty."""
@@ -541,28 +557,36 @@ class MediaManager:
         self.clean_legacy_caches()
         provider = provider or self.image_settings.provider
 
-        # Try cache first (now validated, scoped per scene to avoid collisions)
-        cache_key = self._get_cache_key(f"{prompt}|scene:{scene_id}")
-        cached = self._get_cached_path(cache_key)
-        if self._verify_image(cached):
-            return ImageAsset(
-                path=cached,
-                prompt=prompt,
-                source="cache",
-                width=self.image_settings.width,
-                height=self.image_settings.height,
-            )
+        # Try cache first (validated, scoped per scene to avoid collisions).
+        # Provider-aware: an sdxl_local run must never be served a cached
+        # Pollinations/placeholder image that merely shares the generic
+        # scene key — a failed SDXL fallback run poisons that key, and the
+        # next sdxl_local run then renders nothing at all. The SDXL stack
+        # keeps its own scope key inside _generate_sdxl_local.
+        if provider != "sdxl_local":
+            cache_key = self._get_cache_key(f"{prompt}|scene:{scene_id}")
+            cached = self._get_cached_path(cache_key)
+            if self._verify_image(cached):
+                w, h = self._image_size(cached)
+                return ImageAsset(
+                    path=cached,
+                    prompt=prompt,
+                    source="cache",
+                    width=w,
+                    height=h,
+                )
 
         # Try local assets if configured
         if provider == "local" or provider == "local_assets":
             local = self.get_local_asset(prompt)
             if local:
+                w, h = self._image_size(local)
                 return ImageAsset(
                     path=local,
                     prompt=prompt,
                     source="local",
-                    width=self.image_settings.width,
-                    height=self.image_settings.height,
+                    width=w,
+                    height=h,
                 )
 
         # SDXL local primary on T4 (opt-in), Pollinations fallback

@@ -87,6 +87,49 @@ class TestMediaManager:
         assert path.name == "abc123.jpg"
         assert path.parent == manager._assets_dir
 
+    # ── provider-aware cache ─────────────────────────────────────────
+
+    def test_sdxl_local_never_serves_generic_cached_image(self, settings):
+        """Real A100 failure this guards: an SDXL run that fell back to
+        Pollinations cached its 576x1024 image under the generic scene key;
+        the next sdxl_local run for the same prompt then 'served' it from
+        cache in 0.0s as if the SDXL stack had produced it."""
+        from PIL import Image
+
+        manager = ImageManager(settings)
+        generic_key = manager._get_cache_key("busto estoico|scene:1")
+        poisoned = manager._get_cached_path(generic_key)
+        Image.new("RGB", (576, 1024)).save(poisoned)
+
+        with patch.object(manager, "_generate_sdxl_local",
+                          return_value=ImageAsset(
+                              path=Path(settings.image.local_assets_path) / "gen.jpg",
+                              prompt="busto estoico", source="sdxl-local",
+                              width=832, height=1216)):
+            asset = manager.get_image_for_prompt("busto estoico", scene_id=1,
+                                                 provider="sdxl_local")
+
+        assert asset.source != "cache"
+        assert asset.path != poisoned
+        assert (asset.width, asset.height) == (832, 1216)
+
+    def test_generic_provider_still_serves_cache(self, settings):
+        """Non-SDXL providers keep their original prompt-scoped cache."""
+        from PIL import Image
+
+        manager = ImageManager(settings)
+        key = manager._get_cache_key("busto estoico|scene:1")
+        cached = manager._get_cached_path(key)
+        Image.new("RGB", (576, 1024)).save(cached)
+
+        asset = manager.get_image_for_prompt("busto estoico", scene_id=1,
+                                             provider="pollinations")
+
+        assert asset.source == "cache"
+        assert asset.path == cached
+        # Dims must be the file's real pixels, not the configured canvas.
+        assert (asset.width, asset.height) == (576, 1024)
+
     # ── _verify_image ────────────────────────────────────────────────
     def test_verify_image_missing(self, manager):
         assert manager._verify_image(Path("/nonexistent/path.jpg")) is False
