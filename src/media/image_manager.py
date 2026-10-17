@@ -101,15 +101,16 @@ class MediaManager:
         stack.has_refiner = bool(cfg.sdxl_refiner) and "turbo" not in cfg.sdxl_model.lower()
         if stack.has_refiner:
             try:
+                # Official two-stage pattern: the refiner repo declares
+                # `text_encoder`/`tokenizer` as null, so sharing the base's
+                # text_encoder gives encode_prompt 1 tokenizer vs 2 encoders;
+                # its zip then drops the pooled-negative embedding and the
+                # refiner dies at `.repeat()` on None. Share te2 + vae only.
                 stack.refiner = self._load_sdxl_pipe(
                     cfg.sdxl_refiner,
                     "img2img",
                     torch,
-                    shared={
-                        "text_encoder": stack.base.text_encoder,
-                        "text_encoder_2": stack.base.text_encoder_2,
-                        "vae": stack.base.vae,
-                    },
+                    shared=self._sdxl_shared(stack, "refiner"),
                 )
             except Exception as exc:
                 print(f"   [WARN] SDXL refiner unavailable, base-only: {exc}")
@@ -134,6 +135,29 @@ class MediaManager:
             f" hires {'on' if cfg.sdxl_hires else 'off'}"
         )
         return stack
+
+    @staticmethod
+    def _sdxl_shared(stack: "_SDXLStack", kind: str) -> dict:
+        """Components shared between the base pipeline and a secondary one.
+
+        diffusers' encode_prompt zips tokenizers and text encoders, so the
+        shared set must stay *aligned* with what the target repo declares:
+
+        - refiner repo: only ``text_encoder_2``/``tokenizer_2`` exist -> share
+          ``text_encoder_2`` + ``vae`` (the official two-stage pattern).
+        - img2img built from the base repo: all four exist -> share the full
+          aligned set so nothing gets loaded twice.
+        """
+        base = stack.base
+        if kind == "refiner":
+            return {"text_encoder_2": base.text_encoder_2, "vae": base.vae}
+        return {
+            "text_encoder": base.text_encoder,
+            "text_encoder_2": base.text_encoder_2,
+            "tokenizer": base.tokenizer,
+            "tokenizer_2": base.tokenizer_2,
+            "vae": base.vae,
+        }
 
     @staticmethod
     def _load_sdxl_pipe(repo: str, kind: str, torch, shared: Optional[dict] = None):
@@ -167,11 +191,7 @@ class MediaManager:
                 cfg.sdxl_model,
                 "img2img",
                 stack.torch,
-                shared={
-                    "text_encoder": stack.base.text_encoder,
-                    "text_encoder_2": stack.base.text_encoder_2,
-                    "vae": stack.base.vae,
-                },
+                shared=self._sdxl_shared(stack, "img2img"),
             )
             if cfg.sdxl_cpu_offload:
                 try:

@@ -8,11 +8,13 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
 from config.profiles import FORMAT_CANVAS
 from scripts import colab_env
+from src.media import ImageManager
 
 
 class TestConstants:
@@ -43,6 +45,36 @@ class TestConstants:
         Colab's preinstalled wandb/spacy. The channel voice is edge-tts and the
         gTTS import is lazy, so it stays out of the Colab dependency list."""
         assert not any(dep.lower().startswith("gtts") for dep in colab_env.PYTHON_DEPS)
+
+
+class TestSdxlSharedComponents:
+    """The SDXL two-stage loading must keep tokenizers/encoders aligned.
+
+    Real failure this guards: sharing the base's ``text_encoder`` with the
+    refiner repo (which declares ``text_encoder``/``tokenizer`` as null) makes
+    diffusers' ``encode_prompt`` zip 1 tokenizer against 2 encoders, so the
+    negative pooled embedding is never computed and the refiner dies with
+    ``'NoneType' object has no attribute 'repeat'``.
+    """
+
+    @staticmethod
+    def _stack():
+        from src.media.image_manager import _SDXLStack
+
+        stack = _SDXLStack()
+        stack.base = MagicMock()  # components all mocked; only presence matters
+        return stack
+
+    def test_refiner_gets_the_official_pattern(self):
+        shared = ImageManager._sdxl_shared(self._stack(), "refiner")
+        assert set(shared) == {"text_encoder_2", "vae"}
+        assert "text_encoder" not in shared and "tokenizer" not in shared
+
+    def test_base_repo_img2img_gets_the_full_aligned_set(self):
+        shared = ImageManager._sdxl_shared(self._stack(), "img2img")
+        assert set(shared) == {
+            "text_encoder", "text_encoder_2", "tokenizer", "tokenizer_2", "vae"
+        }
 
     def test_essentials_are_installed(self):
         joined = " ".join(colab_env.PYTHON_DEPS).lower()
