@@ -482,6 +482,25 @@ class VideoComposer:
         alphas = rng.uniform(60.0, 120.0, count)
         return list(zip(positions[:, 0], positions[:, 1], velocities[:, 0], velocities[:, 1], radii, alphas))
 
+    @staticmethod
+    def _cine_vignette_map(width: int, height: int, strength: float):
+        """Static radial vignette used by the cinematic grade.
+
+        It only depends on the canvas and the grade strength, so building it
+        once per scene instead of once per frame takes a sqrt() over the whole
+        frame (2M pixels at 1080x1920) out of the hot loop.
+        """
+        import numpy as np
+
+        yy, xx = np.ogrid[:height, :width]
+        distance = np.sqrt(
+            ((xx - width / 2) / (width / 2)) ** 2
+            + ((yy - height / 2) / (height / 2)) ** 2
+        )
+        return np.clip(
+            1.0 - float(strength) * np.maximum(distance - 0.15, 0.0), 0.72, 1.0
+        ).astype(np.float32)
+
     def _apply_kenburns_and_text(self, image_path: Path, audio_path: Path, text_overlay: str,
                                   output_path: Path, scene_duration: float, scene_number: int,
                                   voiceover_text: str | None = None) -> bool:
@@ -510,6 +529,23 @@ class VideoComposer:
                 self._make_particles(target_w, target_h, scene_number)
                 if self.visual_engine_settings.enabled else ()
             )
+
+            # Static per-scene layers, built once instead of once per frame:
+            # the cinematic vignette (a sqrt over the whole frame) and the
+            # visual-engine subject mask (fixed ellipse geometry).
+            cine = self.settings.cine
+            cine_on = bool(cine.enabled)
+            vignette_map = (
+                self._cine_vignette_map(target_w, target_h, cine.vignette)
+                if cine_on else None
+            )
+            subject_mask = None
+            if self.visual_engine_settings.enabled:
+                subject_mask = Image.new("L", (target_w, target_h), 0)
+                ImageDraw.Draw(subject_mask).ellipse(
+                    (target_w * 0.08, target_h * 0.02, target_w * 0.92, target_h * 1.02),
+                    fill=235,
+                )
 
             # Ken Burns effect parameters (deterministic per scene for reproducibility)
             zoom = self.kenburns_settings.zoom_factor
@@ -562,29 +598,15 @@ class VideoComposer:
                     bg_top = max(0, min(int(cy - bg_h / 2 + (img_h - bg_h) * 0.06 * bg_progress), img_h - bg_h))
                     background = img.crop((bg_left, bg_top, bg_left + bg_w, bg_top + bg_h)).resize((target_w, target_h), Image.LANCZOS).convert("RGBA")
                     subject = resized.convert("RGBA")
-                    mask = Image.new("L", (target_w, target_h), 0)
-                    mask_draw = ImageDraw.Draw(mask)
-                    mask_draw.ellipse((target_w * 0.08, target_h * 0.02, target_w * 0.92, target_h * 1.02), fill=235)
-                    subject.putalpha(mask)
+                    subject.putalpha(subject_mask)
                     resized = Image.alpha_composite(background, subject).convert("RGB")
 
-                if self.settings.cine.enabled:
+                if cine_on:
                     from PIL import ImageEnhance
-                    cine = self.settings.cine
                     resized = ImageEnhance.Color(resized).enhance(cine.saturation)
                     resized = ImageEnhance.Contrast(resized).enhance(cine.contrast)
                     frame = np.asarray(resized).astype(np.float32)
-                    yy, xx = np.ogrid[:target_h, :target_w]
-                    distance = np.sqrt(
-                        ((xx - target_w / 2) / (target_w / 2)) ** 2
-                        + ((yy - target_h / 2) / (target_h / 2)) ** 2
-                    )
-                    vignette = np.clip(
-                        1.0 - cine.vignette * np.maximum(distance - 0.15, 0.0),
-                        0.72,
-                        1.0,
-                    )
-                    frame *= vignette[..., None]
+                    frame *= vignette_map[..., None]
                     if cine.grain:
                         rng = np.random.default_rng(int(t * self.video_settings.fps) + scene_number)
                         frame += rng.normal(0, cine.grain / 2, frame.shape[:2])[..., None]

@@ -11,6 +11,33 @@ from src.narrative import Scene, Story
 from config import get_settings, reset_settings
 
 
+class TestCineVignetteMap:
+    """The vignette is a static per-scene layer; recomputing it per frame was
+    a sqrt() over the whole 1080x1920 canvas inside the moviepy hot loop."""
+
+    def test_shape_dtype_and_bounds(self):
+        m = VideoComposer._cine_vignette_map(64, 48, 0.45)
+        assert m.shape == (48, 64)
+        assert str(m.dtype) == "float32"
+        assert 0.72 <= float(m.min()) and float(m.max()) <= 1.0
+
+    def test_matches_the_inline_formula(self):
+        import numpy as np
+
+        w, h, strength = 32, 20, 0.6
+        yy, xx = np.ogrid[:h, :w]
+        distance = np.sqrt(((xx - w / 2) / (w / 2)) ** 2 + ((yy - h / 2) / (h / 2)) ** 2)
+        expected = np.clip(1.0 - strength * np.maximum(distance - 0.15, 0.0), 0.72, 1.0)
+
+        got = VideoComposer._cine_vignette_map(w, h, strength)
+        assert np.allclose(got, expected, atol=1e-6)
+
+    def test_center_is_bright_and_edges_darken(self):
+        m = VideoComposer._cine_vignette_map(100, 100, 0.5)
+        assert m[50, 50] == pytest.approx(1.0)
+        assert m[0, 0] < m[50, 50]
+
+
 class TestCompositionResult:
     def test_result_creation(self):
         result = CompositionResult(
