@@ -38,7 +38,10 @@ PYTHON_DEPS = (
     "opencv-python-headless>=4.8.0",
     "soundfile>=0.12.1",
     "edge-tts>=6.1.0",
-    "gtts>=2.5.0",
+    # gTTS stays OUT of the Colab install on purpose: gTTS 2.5.4 caps
+    # click<8.2, and pip would downgrade click and break Colab's preinstalled
+    # wandb/spacy. The import is lazy (only reached if someone explicitly
+    # asks for --tts gtts), and the channel voice is edge-tts.
     "moviepy>=2.0.0",
     "python-dotenv>=1.0.0",
     "google-genai>=1.0.0",

@@ -38,6 +38,12 @@ class TestConstants:
         joined = " ".join(colab_env.PYTHON_DEPS).lower()
         assert "realesrgan" not in joined and "basicsr" not in joined
 
+    def test_gtts_is_not_pip_installed(self):
+        """gTTS caps click<8.2, which forces pip to downgrade click and breaks
+        Colab's preinstalled wandb/spacy. The channel voice is edge-tts and the
+        gTTS import is lazy, so it stays out of the Colab dependency list."""
+        assert not any(dep.lower().startswith("gtts") for dep in colab_env.PYTHON_DEPS)
+
     def test_essentials_are_installed(self):
         joined = " ".join(colab_env.PYTHON_DEPS).lower()
         for package in ("diffusers", "transformers", "accelerate", "moviepy", "edge-tts"):
