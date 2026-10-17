@@ -211,11 +211,77 @@ class TestVideoComposer:
         mock_mp.assert_not_called()
         assert result.scenes_count == 1
 
-    def test_scene_filter_renders_half_res_then_upscales(self, composer):
+    def test_scene_filter_renders_zoompan_at_the_canvas(self, composer):
+        """The filter used to zoompan at 540x960 and upscale afterwards, which
+        doubled every integer crop step on screen: a slow pan froze for five
+        frames and then jumped one pixel. Measured frame by frame on the
+        delivered reel (kb_diag2/3), so zoompan now runs straight to the canvas
+        over a pre-upscaled still."""
         fc = composer._build_scene_filter_complex(1920, 1080, 10.0, "zoom_in", "Hi")
-        assert "s=960x540" in fc  # zoompan at half resolution for speed
-        assert "scale=1920:1080" in fc  # upscale before text
-        assert fc.index("scale=1920:1080") < fc.index("drawtext")  # crisp text
+        assert "s=1920x1080" in fc            # zoompan straight to the canvas
+        assert "scale=1920:1080" not in fc    # no half-res + upscale any more
+        assert fc.index("zoompan") < fc.index("drawtext")  # crisp text
+
+    def test_prepared_still_disabled_returns_the_original(self, composer, tmp_path):
+        from dataclasses import replace
+
+        composer.kenburns_settings = replace(composer.kenburns_settings, upscale=1)
+        img = tmp_path / "a.jpg"
+        img.write_bytes(b"x")
+        assert composer._prepared_still(img, 1) == img
+
+    @patch("src.video.composer.subprocess.run")
+    def test_prepared_still_upscales_once(self, mock_run, composer, tmp_path):
+        def _write(cmd, **kwargs):
+            Path(cmd[-1]).write_bytes(b"big")
+            return MagicMock(returncode=0)
+
+        mock_run.side_effect = _write
+        img = tmp_path / "a.jpg"
+        img.write_bytes(b"x")
+        out = composer._prepared_still(img, 3)
+        assert out.name == "still_003_2x.png"
+        cmd = mock_run.call_args[0][0]
+        vf = cmd[cmd.index("-vf") + 1]
+        assert "scale=3840:2160" in vf    # canvas 1920x1080, doubled
+        assert "lanczos" in vf
+
+        mock_run.reset_mock()
+        assert composer._prepared_still(img, 3) == out
+        mock_run.assert_not_called()      # reused, no second encode
+
+    def test_wrap_to_canvas_fits_every_line(self, composer):
+        """44 characters measured 1283 px at size 72 inside a 1080 px canvas,
+        which is why the reel's subtitles were clipped on both sides."""
+        text = "el estoicismo, el cosmos no comete error"
+        size = composer.font_settings.size
+        max_px = 1080 * composer.font_settings.width_fraction
+        wrapped = composer._wrap_to_canvas(text, size, max_px)
+        lines = wrapped.split("\n")
+        assert len(lines) >= 2
+        assert all(composer._measure_text(line, size) <= max_px for line in lines)
+        assert " ".join(lines) == text     # nothing dropped
+
+    def test_fit_subtitle_shrinks_instead_of_dropping_words(self, composer):
+        # Font metrics stubbed so the check does not depend on the installed face.
+        with patch.object(VideoComposer, "_measure_text",
+                          lambda self, t, s: len(t) * s * 0.5):
+            text = " ".join(["palabra"] * 8)
+            wrapped, size = composer._fit_subtitle(text, 1080, composer.font_settings.size)
+        assert size < composer.font_settings.size
+        assert wrapped.count("\n") + 1 <= composer.font_settings.max_lines
+        assert " ".join(wrapped.split()) == text
+
+    def test_drawtext_splits_wrapped_lines_into_their_own_filters(self, composer):
+        text = "el estoicismo, el cosmos no comete error"
+        dt = composer._build_single_drawtext(text, 1080, 1920, 0.0, 3.0)
+        wrapped, _ = composer._fit_subtitle(text, 1080, composer.font_settings.size)
+        expected = len([line for line in wrapped.split("\n") if line.strip()])
+        # drawtext does not wrap and its \n escape renders a literal "n", so
+        # each line is its own filter.
+        assert dt.count("drawtext=") == expected >= 2
+        assert r"\n" not in dt
+        assert "estoicismo" in dt and "error" in dt
 
     @patch("src.video.composer.subprocess.run")
     def test_get_video_duration_success(self, mock_run, composer):
@@ -252,7 +318,7 @@ class TestVideoComposer:
         assert "fontsize=72" in filter_str
         assert "fontcolor=0xF5F0E1" in filter_str
         assert "bordercolor=0x1A1A1A" in filter_str
-        assert "borderw=3" in filter_str
+        assert "borderw=4" in filter_str
         assert "h-text_h-240" in filter_str  # bottom position raised 120px
 
     def test_build_text_filter_special_chars(self, composer):
@@ -270,17 +336,13 @@ class TestVideoComposer:
         assert all(len(line) <= composer.font_settings.max_chars_per_line for line in lines)
         assert wrapped.endswith("…")
 
-    def test_text_filter_contains_wrapped_newline(self, composer):
-        filter_str = composer._build_text_filter(
-            "Una frase larga que debe saltar de línea para no salirse del video vertical",
-            1080,
-            1920,
-            5.0,
-        )
-        # Two timed cards instead of one wrapped block
-        assert filter_str.count("drawtext=") == 2
+    def test_text_filter_splits_into_timed_cards(self, composer):
+        text = "Una frase larga que debe saltar de línea para no salirse del video vertical"
+        filter_str = composer._build_text_filter(text, 1080, 1920, 5.0)
+        # Two timed cards, each one or more drawtext line filters.
         assert "between(t,0.0,2.5)" in filter_str
         assert "between(t,2.5,5.0)" in filter_str
+        assert filter_str.count("drawtext=") >= 2
 
     def test_subtitles_follow_narration_word_budget(self, composer):
         cards = composer._timed_subtitle_cards(
@@ -291,6 +353,31 @@ class TestVideoComposer:
         assert cards[0][1] == 0.0
         assert cards[-1][2] == 10.0
         assert all(end > start for _, start, end in cards)
+
+    def test_subtitle_cards_never_drop_narration_words(self, composer):
+        """Formatting each card used to cap it by character count and hide the
+        tail behind an ellipsis, so part of the narration was simply not shown
+        ("la misma manera los obstaculos las traiciones…")."""
+        narration = (
+            "de la misma manera los obstaculos las traiciones y las perdidas "
+            "son la materia de la virtud y el combustible del caracter"
+        )
+        cards = composer._timed_subtitle_cards(narration, 14.0, width=1080)
+        rebuilt = " ".join(card for card, _, _ in cards)
+        assert rebuilt == " ".join(narration.split())
+        assert "…" not in rebuilt
+
+    def test_cards_are_budgeted_from_the_measured_font(self, composer):
+        """The character budget was blind to the font: 45 characters of Georgia
+        measured 1283 px in a 1080 px canvas. Budgeted by pixels, a card needs
+        no shrinking to fit its two lines."""
+        narration = " ".join(["palabra"] * 60)
+        cards = composer._timed_subtitle_cards(narration, 30.0, width=1080)
+        assert len(cards) >= 2
+        for card, _, _ in cards:
+            wrapped, size = composer._fit_subtitle(card, 1080, composer.font_settings.size)
+            assert size == composer.font_settings.size
+            assert wrapped.count("\n") + 1 <= composer.font_settings.max_lines
 
     @patch("src.video.composer.subprocess.run")
     def test_compose_scene_ffmpeg_success(self, mock_run, composer):
@@ -305,7 +392,11 @@ class TestVideoComposer:
 
             result = composer._compose_scene_ffmpeg(img, aud, "Test overlay", out, 5.0, 1)
             assert result is True
-            mock_run.assert_called_once()
+            # First call pre-upscales the still, second encodes the scene.
+            assert mock_run.call_count == 2
+            scene_cmd = mock_run.call_args_list[-1][0][0]
+            assert "-filter_complex" in scene_cmd
+            assert scene_cmd[-1] == str(out)
 
     @patch("src.video.composer.subprocess.run")
     def test_compose_scene_ffmpeg_failure(self, mock_run, composer):

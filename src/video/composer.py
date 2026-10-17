@@ -292,7 +292,7 @@ class VideoComposer:
         overlay-only behaviour remains as a compatibility fallback.
         """
         cards = (
-            self._timed_subtitle_cards(subtitle_text, duration)
+            self._timed_subtitle_cards(subtitle_text, duration, width=width)
             if subtitle_text
             else [(card, start + index * duration / max(1, len(self._overlay_cards(text))),
                    start + (index + 1) * duration / max(1, len(self._overlay_cards(text))))
@@ -303,6 +303,55 @@ class VideoComposer:
             filters.append(self._build_single_drawtext(card, width, height, begin, end))
         return ",".join(filters)
 
+    def _measure_text(self, text: str, font_size: int) -> float:
+        """Width in pixels of ``text`` at ``font_size`` with the real face."""
+        try:
+            from PIL import ImageFont
+
+            font = ImageFont.truetype(self.font_settings.font_path, int(font_size))
+            return float(font.getlength(text))
+        except Exception:
+            # Crude but safe: serif faces average a bit over half an em.
+            return len(text) * font_size * 0.55
+
+    def _wrap_to_canvas(self, text: str, font_size: int, max_px: float) -> str:
+        """Greedy word wrap so every line fits inside ``max_px`` pixels.
+
+        Counting characters is not enough: "el estoicismo, el cosmos no comete
+        error" is 44 characters and measured 1283 px at size 72 inside a
+        1080 px canvas, so the drawtext renderer clipped it on both sides.
+        """
+        words = str(text or "").split()
+        if not words:
+            return ""
+        lines: list[str] = []
+        current = words[0]
+        for word in words[1:]:
+            candidate = f"{current} {word}"
+            if self._measure_text(candidate, font_size) <= max_px:
+                current = candidate
+            else:
+                lines.append(current)
+                current = word
+        lines.append(current)
+        return "\n".join(lines)
+
+    def _fit_subtitle(self, text: str, width: int, font_size: int) -> tuple[str, int]:
+        """Wrap a subtitle card, shrinking the face a little when needed.
+
+        Words are never dropped: narration must stay readable, so a card that
+        would need a third line renders slightly smaller instead.
+        """
+        max_px = width * float(getattr(self.font_settings, "width_fraction", 0.90))
+        max_lines = max(1, int(self.font_settings.max_lines))
+        size = int(font_size)
+        floor = max(24, int(font_size * 0.72))
+        wrapped = self._wrap_to_canvas(text, size, max_px)
+        while size > floor and wrapped.count("\n") + 1 > max_lines:
+            size = int(size * 0.92)
+            wrapped = self._wrap_to_canvas(text, size, max_px)
+        return wrapped, size
+
     def _build_single_drawtext(
         self,
         text: str,
@@ -311,48 +360,60 @@ class VideoComposer:
         start: float,
         end: float,
     ) -> str:
-        """Build a single FFmpeg drawtext filter with a time window."""
-        # drawtext uses the escaped two-character sequence ``\\n`` for a line
-        # break.  Keeping the wrapping here makes the MoviePy and FFmpeg
-        # renderers produce the same safe subtitle layout.
-        escaped = (
-            text.replace("'", r"'\''")
-            .replace(":", r"\:")
-            .replace("%", r"\%")
-            .replace("\n", r"\n")
-        )
+        """Build the drawtext filter(s) for one timed subtitle card.
 
-        font_size = self.font_settings.size
+        drawtext has no wrapping, and its ``\\n`` escape is **not** a line break
+        in current builds: it renders a literal "n" ("linea unonlinea dos" was
+        measured locally), while a real newline leaves a missing-glyph box. So
+        every wrapped line becomes its own filter, centred and stacked upwards
+        from ``margin_bottom``.
+        """
+        import sys
+
+        font_size = int(self.font_settings.size)
+        wrapped, font_size = self._fit_subtitle(text, width, font_size)
+        lines = [line for line in wrapped.split("\n") if line.strip()] or ["…"]
+
         font_color = self.font_settings.color.lstrip("#")
         stroke_color = self.font_settings.stroke_color.lstrip("#")
         stroke_width = self.font_settings.stroke_width
         margin_bottom = self.font_settings.margin_bottom
+        line_step = max(1.0, font_size * float(self.font_settings.line_spacing))
 
         font_path = self.font_settings.font_path.replace("\\", "/")
-        import sys
         if sys.platform == "win32" and ":" in font_path:
             font_path = font_path.replace(":", "\\:")
 
-        if self.font_settings.position == "bottom":
-            y_pos = f"h-text_h-{margin_bottom}"
-        elif self.font_settings.position == "top":
-            y_pos = f"{margin_bottom}"
-        else:
-            y_pos = "(h-text_h)/2"
+        filters = []
+        for index, line in enumerate(lines):
+            escaped = (
+                line.replace("'", r"'\''")
+                .replace(":", r"\:")
+                .replace("%", r"\%")
+            )
+            above = len(lines) - 1 - index
+            if self.font_settings.position == "bottom":
+                y_pos = f"h-text_h-{margin_bottom + above * line_step:.0f}"
+            elif self.font_settings.position == "top":
+                y_pos = f"{margin_bottom + index * line_step:.0f}"
+            else:
+                block = len(lines) * line_step
+                y_pos = f"(h-{block:.0f})/2+{index * line_step:.0f}"
 
-        return (
-            f"drawtext="
-            f"text='{escaped}':"
-            f"fontfile='{font_path}':"
-            f"fontsize={font_size}:"
-            f"fontcolor=0x{font_color}:"
-            f"bordercolor=0x{stroke_color}:"
-            f"borderw={stroke_width}:"
-            f"x=(w-text_w)/2:"
-            f"y={y_pos}:"
-            f"line_spacing={self.font_settings.line_spacing}:"
-            f"enable='between(t,{start},{end})'"
-        )
+            filters.append(
+                f"drawtext="
+                f"text='{escaped}':"
+                f"fontfile='{font_path}':"
+                f"fontsize={font_size}:"
+                f"fontcolor=0x{font_color}:"
+                f"bordercolor=0x{stroke_color}:"
+                f"borderw={stroke_width}:"
+                f"x=(w-text_w)/2:"
+                f"y={y_pos}:"
+                f"line_spacing={self.font_settings.line_spacing}:"
+                f"enable='between(t,{start},{end})'"
+            )
+        return ",".join(filters)
 
     def _format_overlay_text(self, text: str) -> str:
         """Wrap and cap subtitles so they remain inside the video safe area."""
@@ -395,17 +456,36 @@ class VideoComposer:
             return [" ".join(words[:half]), " ".join(words[half:])]
         return lines if lines else ["…"]
 
-    def _timed_subtitle_cards(self, narration: str, duration: float) -> list[tuple[str, float, float]]:
-        """Split narration into readable cards timed by spoken word count."""
+    def _timed_subtitle_cards(
+        self, narration: str, duration: float, width: int | None = None
+    ) -> list[tuple[str, float, float]]:
+        """Split narration into readable cards timed by spoken word count.
+
+        ``width`` (the canvas in pixels) budgets each card from the *measured*
+        font instead of counting characters: a 44 character card measured
+        1283 px inside a 1080 px canvas and used to be clipped.
+        """
         import re
 
         clean = " ".join(str(narration or "").split())
         if not clean:
             return [("…", 0.0, max(0.1, duration))]
 
-        max_chars = max(24, int(self.font_settings.max_chars_per_line)) * max(
-            1, int(self.font_settings.max_lines)
-        )
+        max_lines = max(1, int(self.font_settings.max_lines))
+        font_size = int(self.font_settings.size)
+        if width:
+            reference = self._measure_text("abcdefghij", font_size) / 10.0
+            per_line = max(
+                12,
+                int(
+                    width * float(self.font_settings.width_fraction)
+                    / max(1.0, reference)
+                    * 0.85          # word boundaries never pack as tightly
+                ),
+            )
+            max_chars = per_line * max_lines
+        else:
+            max_chars = max(24, int(self.font_settings.max_chars_per_line)) * max_lines
         # Break at sentence ends as soon as a card is substantial, and never
         # let a card grow past what the two lines can hold. The previous rule
         # required 7 words before a punctuation break, so "…ocurre. Después…"
@@ -438,7 +518,11 @@ class VideoComposer:
             count = len(chunk.split())
             card_duration = duration * count / total_words
             end = duration if index == len(chunks) - 1 else cursor + card_duration
-            timed.append((self._format_overlay_text(chunk), cursor, end))
+            # Keep the whole chunk: wrapping to the canvas happens at render
+            # time, while formatting it here used to drop the card's tail
+            # behind an ellipsis ("la misma manera los obstaculos las
+            # traiciones…" lost the rest of the narration).
+            timed.append((" ".join(chunk.split()), cursor, end))
             cursor = end
         return timed
 
@@ -630,7 +714,9 @@ class VideoComposer:
             try:
                 # MoviePy 2.x compatible TextClip - avoid font parameter conflict
                 cards = (
-                    self._timed_subtitle_cards(voiceover_text, scene_duration)
+                    self._timed_subtitle_cards(
+                        voiceover_text, scene_duration, width=self.video_settings.width
+                    )
                     if voiceover_text
                     else [
                         (card, index * scene_duration / max(1, len(self._overlay_cards(text_overlay))),
@@ -709,10 +795,14 @@ class VideoComposer:
         text_overlay: str,
         voiceover_text: str | None = None,
     ) -> str:
-        """Full per-scene filter: half-res zoompan, upscale, text, cine.
+        """Full per-scene filter: zoompan straight to the canvas, then text.
 
-        Full-res zoompan is ~4x slower (single-threaded) and times out on
-        long scenes; text stays crisp because drawtext runs after upscale.
+        The old chain ran zoompan at half resolution and upscaled afterwards,
+        which doubled every integer crop step on screen (a slow pan moved 1 px
+        of the 540 px canvas = 2 px of the reel, every ~5 frames: the picture
+        froze and then jumped). The still is now pre-upscaled once by
+        ``kenburns.upscale``, so an integer crop step is a sub-pixel move and
+        the text stays crisp because drawtext still runs last.
         """
         if self.kenburns_settings.enabled:
             if direction == "random":
@@ -722,12 +812,12 @@ class VideoComposer:
                 else:
                     direction = random.choice(["zoom_in", "zoom_out", "pan_left", "pan_right"])
             kenburns = self._build_kenburns_filter(
-                width // 2, height // 2, duration, direction,
+                width, height, duration, direction,
             )
             text_filter = self._build_text_filter(
                 text_overlay, width, height, duration, subtitle_text=voiceover_text,
             )
-            filter_complex = f"[0:v]{kenburns},scale={width}:{height}[kb];[kb]{text_filter}[v]"
+            filter_complex = f"[0:v]{kenburns}[kb];[kb]{text_filter}[v]"
         else:
             text_filter = self._build_text_filter(
                 text_overlay, width, height, duration, subtitle_text=voiceover_text,
@@ -739,10 +829,40 @@ class VideoComposer:
             filter_complex = filter_complex.replace("[v]", f",{cine_filter}[v]", 1)
         return filter_complex
 
+    def _prepared_still(self, image_path: Path, scene_number: int) -> Path:
+        """Return the still enlarged ``kenburns.upscale`` times (or unchanged).
+
+        zoompan moves an integer crop: on a 1080 px still a slow pan advanced a
+        pixel every ~5 frames, so the picture stalled and then jumped (measured
+        frame by frame on the delivered reel). Enlarging the still once turns
+        that integer step into a sub-pixel move on screen.
+        """
+        factor = int(getattr(self.kenburns_settings, "upscale", 1) or 1)
+        if factor <= 1 or not self.kenburns_settings.enabled:
+            return image_path
+        out = self._temp_dir / f"still_{scene_number:03d}_{factor}x.png"
+        if out.exists():
+            return out
+        cmd = [
+            "ffmpeg", "-v", "error", "-y", "-i", str(image_path),
+            "-vf", f"scale={self.video_settings.width * factor}:"
+                   f"{self.video_settings.height * factor}:flags=lanczos",
+            "-frames:v", "1", str(out),
+        ]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+            if result.returncode == 0 and out.exists():
+                return out
+            print("   [WARN] still upscale failed, zoompan uses the original size")
+        except Exception:
+            pass
+        return image_path
+
     def _compose_scene_ffmpeg_fallback(self, image_path: Path, audio_path: Path, text_overlay: str,
                                         output_path: Path, scene_duration: float, scene_number: int,
                                         voiceover_text: str | None = None) -> bool:
         """Compose a single scene using FFmpeg directly (fallback)."""
+        image_path = self._prepared_still(image_path, scene_number)
         # Build filter complex
         filter_complex = self._build_scene_filter_complex(
             self.video_settings.width,
@@ -791,7 +911,8 @@ class VideoComposer:
                                output_path: Path, scene_duration: float, scene_number: int,
                                voiceover_text: str | None = None) -> bool:
         """Compose a single scene using FFmpeg directly."""
-        # Build filter complex (shared helper: half-res zoompan + upscale)
+        image_path = self._prepared_still(image_path, scene_number)
+        # Build filter complex (shared helper: pre-upscaled still + zoompan to canvas)
         filter_complex = self._build_scene_filter_complex(
             self.video_settings.width,
             self.video_settings.height,
@@ -1101,6 +1222,8 @@ class VideoComposer:
         # Cleanup temp scene files
         for sv in scene_videos:
             sv.unlink(missing_ok=True)
+        for still in self._temp_dir.glob("still_*.png"):
+            still.unlink(missing_ok=True)
 
         # Get final video info
         final_duration = self._get_video_duration(output_path)

@@ -44,27 +44,50 @@ class VideoSettings:
 class FontSettings:
     """Typography configuration for text overlays."""
     family: str = "Georgia"
-    # Windows font paths (Georgia is standard on Windows)
-    windows_font_path: str = "C:/Windows/Fonts/georgia.ttf"
-    # Linux font paths
-    linux_font_path: str = "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf"
+    # Bold faces: the delivered reel used the thin regular serif and the
+    # strokes read weak over busy footage.
+    # Windows font paths (Georgia Bold is standard on Windows)
+    windows_font_path: str = "C:/Windows/Fonts/georgiab.ttf"
+    # Linux font paths (fonts-dejavu-core ships the bold serif too)
+    linux_font_path: str = "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"
+    # Tried in order when the platform file is missing (Colab images differ).
+    fallback_fonts: tuple[str, ...] = (
+        "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf",
+        "C:/Windows/Fonts/georgiab.ttf",
+        "C:/Windows/Fonts/georgia.ttf",
+    )
     size: int = 72
     color: str = "#F5F0E1"
     stroke_color: str = "#1A1A1A"
-    stroke_width: int = 3
+    stroke_width: int = 4
     position: Literal["bottom", "center", "top"] = "bottom"
     margin_bottom: int = 240
     max_chars_per_line: int = 45
     max_lines: int = 2
     line_spacing: float = 1.3
+    # Fraction of the canvas width the subtitle block may use. Subtitle lines
+    # are wrapped with the real font metrics against this, because counting
+    # characters let a 44 character line measure 1283 px inside a 1080 px
+    # canvas and get clipped on both sides.
+    width_fraction: float = 0.90
 
     @property
     def font_path(self) -> str:
-        """Get platform-appropriate font path."""
-        import sys
-        if sys.platform == "win32":
-            return self.windows_font_path
-        return self.linux_font_path
+        """Get platform-appropriate font path, falling back to candidates.
+
+        Colab images ship fonts-dejavu-core (serif regular + bold); keeping a
+        list means a missing face degrades to the next one instead of making
+        drawtext fail mid-render.
+        """
+        preferred = self.windows_font_path if os.name == "nt" else self.linux_font_path
+        if Path(preferred).exists():
+            return preferred
+        for candidate in self.fallback_fonts:
+            if Path(candidate).exists():
+                return candidate
+        return preferred
 
 
 @dataclass(frozen=True)
@@ -75,6 +98,13 @@ class KenBurnsSettings:
     duration_factor: float = 1.0
     easing: Literal["linear", "ease_in", "ease_out", "ease_in_out"] = "ease_in_out"
     direction: Literal["zoom_in", "zoom_out", "pan_left", "pan_right", "pan_up", "pan_down", "random"] = "random"
+    # Pre-upscale the still before zoompan. zoompan moves an integer crop, so on
+    # the 1080 px source a slow pan advanced 1 px every ~5 frames: the picture
+    # stalled and then jumped (measured on the delivered reel: 5 identical
+    # frames + a 1 px jump, in the slow part of every zoom). Enlarging the still
+    # once makes that step a sub-pixel move on screen; 2 is nearly free
+    # (+1.2 s per 35 s scene with libx264 medium), 3-4 costs 3-6x the filter.
+    upscale: int = 2
 
 
 @dataclass(frozen=True)
