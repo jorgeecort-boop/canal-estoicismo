@@ -292,7 +292,16 @@ class MediaManager:
             stack = self._get_sdxl_pipeline()
             is_turbo = "turbo" in cfg.sdxl_model.lower()
             steps = max(1, min(4, cfg.sdxl_steps)) if is_turbo else max(1, cfg.sdxl_steps)
-            generator = stack.torch.Generator(device="cuda").manual_seed(1000 + scene_id)
+            # Seed from the full prompt: reproducible per scene (the same
+            # prompt still renders the same image, so the cache stays
+            # coherent) but different across themes. `1000 + scene_id` gave
+            # scene N of every video the same seed and near-identical
+            # prompts, so four different themes came out with four copies
+            # of the same composition.
+            digest = int(hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:15], 16)
+            generator = stack.torch.Generator(device="cuda").manual_seed(
+                1000 + digest % 2_147_483_647
+            )
             base_kwargs = dict(
                 prompt=full_prompt,
                 negative_prompt=cfg.negative_prompt,

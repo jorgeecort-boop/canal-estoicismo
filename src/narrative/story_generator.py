@@ -291,12 +291,15 @@ class StoryGenerator:
         )
         framing = framings[(global_scene - 1) % len(framings)] if global_scene else ""
 
-        # Combine (include theme + global scene to avoid cache collisions)
+        # Combine (include theme + global scene to avoid cache collisions).
+        # Theme keywords and framing lead on purpose: the shared style block
+        # used to open every prompt, so all themes converged on the same
+        # "marble statue in fog" look and the videos felt like one video.
         prompt_parts = [
-            base_style,
-            section_visuals.get(section, ""),
             keywords,
             framing,
+            section_visuals.get(section, ""),
+            base_style,
             f"theme={template.theme}",
             f"global_scene={global_scene if global_scene is not None else scene_index + 1}",
             f"section={section}",
