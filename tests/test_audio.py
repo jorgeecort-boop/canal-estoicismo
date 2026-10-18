@@ -1,5 +1,6 @@
 """Tests for audio/tts_engine module."""
 
+import importlib.util
 import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -143,6 +144,11 @@ class TestTTSEngine:
         with pytest.raises(RuntimeError, match="edge-tts failed"):
             await engine._generate_edge_tts("Test text", Path("/tmp/out.mp3"))
 
+    @pytest.mark.skipif(
+        importlib.util.find_spec("gtts") is None,
+        reason="gtts is a lazy fallback provider and is deliberately "
+        "absent in Colab (it would downgrade click and break Colab packages)",
+    )
     @patch("gtts.gTTS", create=True)
     def test_generate_gtts(self, mock_gtts, engine):
         mock_tts = MagicMock()
