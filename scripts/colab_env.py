@@ -31,9 +31,18 @@ PERSISTED_DIRS = ("assets/images", "output", "logs")
 # own CUDA runtime, and reinstalling it from another index is the classic way
 # to break `torch.cuda.is_available()`.
 PYTHON_DEPS = (
-    "transformers>=4.44.0",
+    "transformers>=4.44.0,<5.19",
+    # <5.19 keeps the pair that rendered SDXL successfully on 2026-10-17
+    # (Colab's pip cache bumped transformers beyond 5.19 overnight and we
+    # have not validated that pair with diffusers 0.40 yet).
     "accelerate>=0.33.0",
-    "diffusers>=0.30.0",
+    # <0.41 keeps the diffusers that rendered SDXL successfully on
+    # 2026-10-17. 0.41.0 (Colab pip cache bump overnight) imports
+    # diffusers.loaders.peft, which needs a torchao with FqnToConfig —
+    # Colab's preinstalled torchao is older and every SDXL call dies at
+    # import time, falling through to Pollinations (HTTP 402) and then to
+    # PIL placeholders.
+    "diffusers>=0.30.0,<0.41",
     "safetensors>=0.4.0",
     "opencv-python-headless>=4.8.0",
     "soundfile>=0.12.1",
