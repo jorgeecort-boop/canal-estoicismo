@@ -220,6 +220,15 @@ class TestStoryGenerator:
         for story in stories:
             assert story.theme in ["control_dichotomy", "virtue_ethics"]
 
+    def test_image_prompts_rotate_motifs_within_theme(self):
+        gen = StoryGenerator()
+        story = gen.generate(theme="memento_mori", num_scenes=5)
+        prompts = [scene.image_prompt for scene in story.scenes]
+        assert len(set(prompts)) == len(prompts)
+        assert "skull marble" in prompts[0]
+        assert "candle burning low" in prompts[1]
+        assert "ancient tomb" in prompts[2]
+
     def test_reproducibility(self):
         gen1 = StoryGenerator()
         gen1.set_seed(123)

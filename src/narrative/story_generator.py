@@ -277,8 +277,12 @@ class StoryGenerator:
             "closing_reflection": "ancient fresco texture, transcendent peaceful resolution, eternal",
         }
 
-        # Keywords from template
-        keywords = " ".join(template.image_keywords[:3])
+        # Rotate the template's visual motifs scene by scene. Using the first
+        # three keywords for every scene made all memento_mori scenes contain
+        # a skull/candle/tomb and all present_moment scenes contain the same
+        # drop/stone/garden composition.
+        visual_index = (global_scene - 1) if global_scene else scene_index
+        keywords = template.image_keywords[visual_index % len(template.image_keywords)]
 
         # Framing variety cycling by global scene (close-up / wide / detail / human / cosmic / fresco)
         framings = (
