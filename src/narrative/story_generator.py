@@ -264,17 +264,20 @@ class StoryGenerator:
         total_in_section: int,
         global_scene: int | None = None,
     ) -> str:
-        """Build an image generation prompt for the scene."""
+        """Build an image generation prompt for the scene.
 
-        # Base style
-        base_style = self.settings.image.style_prompt
+        The SDXL render truncates the prompt to its first 200 characters
+        (image_manager appends the 35mm style block afterwards), so every
+        part below is chosen to be short: motif, framing, theme palette,
+        one motion beat and the section atmosphere, in that order.
+        """
 
         # Section-specific visual emphasis (rotated to avoid repetitive statues)
         section_visuals = {
-            "hook": "dramatic opening, mysterious atmosphere, cinematic lighting",
-            "core_teaching": "dark chiaroscuro, ancient stone hall, volumetric light shafts",
-            "practical_application": "ethereal golden light, daily stoic life, warm focus",
-            "closing_reflection": "ancient fresco texture, transcendent peaceful resolution, eternal",
+            "hook": "dramatic opening, mysterious atmosphere",
+            "core_teaching": "dark chiaroscuro, volumetric light shafts",
+            "practical_application": "ethereal golden light, warm focus",
+            "closing_reflection": "ancient fresco texture, transcendent calm",
         }
 
         # Rotate the template's visual motifs scene by scene. Using the first
@@ -286,24 +289,55 @@ class StoryGenerator:
 
         # Framing variety cycling by global scene (close-up / wide / detail / human / cosmic / fresco)
         framings = (
-            "extreme close-up, shallow depth of field",
-            "wide cinematic shot, epic scale architecture",
-            "macro detail, ancient texture manuscript relief",
-            "human figure, philosopher in contemplation",
-            "aerial cosmic perspective, vast horizon",
-            "ancient fresco wall texture, mural painting style",
+            "extreme close-up, shallow depth",
+            "wide shot, epic architecture",
+            "macro detail, carved relief",
+            "solitary philosopher in contemplation",
+            "aerial view, vast horizon",
+            "fresco texture, mural style",
         )
-        framing = framings[(global_scene - 1) % len(framings)] if global_scene else ""
+        framing = framings[(visual_index) % len(framings)]
+
+        # One subtle motion beat per scene, offset so it never changes in
+        # lockstep with the framing cycle.
+        actions = (
+            "candle smoke curling upward",
+            "dust drifting in a light shaft",
+            "shadow sliding across stone",
+            "embers rising from a low flame",
+            "cloak moving in a faint breeze",
+            "frost forming on worn edges",
+        )
+        action = actions[(visual_index + 2) % len(actions)]
+
+        # Per-theme palette so each reel keeps its own colour world while the
+        # composition, light and motif rotate scene by scene. Living in a dict
+        # (not on the template dataclass) keeps templates.py untouched.
+        palettes = {
+            "memento_mori": "cold bone-white marble, ember orange candlelight, charcoal shadows",
+            "control_dichotomy": "steel blue moonlight, torch amber accents, slate stone",
+            "inner_fortress": "warm sheltered amber, storm indigo beyond the walls, dark bronze",
+            "present_moment": "soft morning mist greys, one warm sunrise gold accent",
+            "impermanence": "fading dawn peach, dust-rose decay, pale stone",
+            "virtue_ethics": "ivory daylight, terracotta and olive tones",
+            "adversity_growth": "stormy indigo sky, a shaft of breaking gold, dark iron",
+            "ego_death": "black void, silver mist, cool teal dissolve",
+            "cosmic_perspective": "deep space navy, nebula teal and gold dust",
+            "amor_fati": "cosmic violet, star silver, warm bronze, midnight blue",
+        }
+        palette = palettes.get(
+            template.theme, "warm amber on marble, deep charcoal shadows"
+        )
 
         # Combine (include theme + global scene to avoid cache collisions).
-        # Theme keywords and framing lead on purpose: the shared style block
-        # used to open every prompt, so all themes converged on the same
-        # "marble statue in fog" look and the videos felt like one video.
+        # Theme keywords lead so SDXL weights the motif; the shared style
+        # block stays out (image_manager appends its own richer 35mm style).
         prompt_parts = [
             keywords,
             framing,
+            palette,
+            action,
             section_visuals.get(section, ""),
-            base_style,
             f"theme={template.theme}",
             f"global_scene={global_scene if global_scene is not None else scene_index + 1}",
             f"section={section}",
