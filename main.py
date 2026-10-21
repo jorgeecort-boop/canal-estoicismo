@@ -60,7 +60,7 @@ Examples:
     gen_parser.add_argument("--image-provider", choices=["local_assets", "sdxl_local", "pollinations"], default=None, help="Image provider (opt-in sdxl_local for T4)")
     gen_parser.add_argument("--upscale", action="store_true", help="Enable Real-ESRGAN upscale when <1080p (T4)")
     gen_parser.add_argument("--transitions", choices=["crossfade", "varied"], default="crossfade", help="Concat transitions (varied opt-in)")
-    gen_parser.add_argument("--composer", choices=["moviepy", "ffmpeg"], default="moviepy", help="Render engine (ffmpeg=low RAM, no particles)")
+    gen_parser.add_argument("--composer", choices=["moviepy", "ffmpeg"], default=None, help="Render engine (default: the hardware profile decides; moviepy=full effects incl. particles, ffmpeg=low RAM, no particles)")
     gen_parser.add_argument("--gemini", action="store_true", help="Use Gemini long-form script (needs GOOGLE_API_KEY)")
     gen_parser.add_argument("--llm", choices=["ollama", "gemini", "openrouter", "nvidia", "freellmapi", "auto"], default=None, help="Long-form provider (ollama=qwen2.5:7b local)")
     gen_parser.add_argument("--format", choices=["landscape", "reel"], default="landscape", help="Video format: landscape (16:9 1920x1080) or reel (9:16 1080x1920)")
@@ -83,7 +83,7 @@ Examples:
     batch_parser.add_argument("--image-provider", choices=["local_assets", "sdxl_local", "pollinations"], default=None, help="Image provider (opt-in sdxl_local for T4)")
     batch_parser.add_argument("--upscale", action="store_true", help="Enable Real-ESRGAN upscale when <1080p (T4)")
     batch_parser.add_argument("--transitions", choices=["crossfade", "varied"], default="crossfade", help="Concat transitions (varied opt-in)")
-    batch_parser.add_argument("--composer", choices=["moviepy", "ffmpeg"], default="moviepy", help="Render engine (ffmpeg=low RAM, no particles)")
+    batch_parser.add_argument("--composer", choices=["moviepy", "ffmpeg"], default=None, help="Render engine (default: the hardware profile decides; moviepy=full effects incl. particles, ffmpeg=low RAM, no particles)")
     batch_parser.add_argument("--gemini", action="store_true", help="Use Gemini long-form script (needs GOOGLE_API_KEY)")
     batch_parser.add_argument("--llm", choices=["ollama", "gemini", "openrouter", "nvidia", "freellmapi", "auto"], default=None, help="Long-form provider (ollama=qwen2.5:7b local)")
     batch_parser.add_argument("--profile", choices=PROFILE_CHOICES, default="auto", help="Hardware profile: auto detects the GPU (a100 = SDXL full + hires, t4 = turbo, none = keep defaults)")
@@ -483,8 +483,12 @@ def main():
         settings = replace(settings, image=replace(settings.image, upscale_enabled=True))
     if getattr(args, "transitions", "crossfade") == "varied":
         settings = replace(settings, transitions=replace(settings.transitions, varied=True))
-    if getattr(args, "composer", "moviepy") == "ffmpeg":
-        settings = replace(settings, video=replace(settings.video, engine="ffmpeg"))
+    if getattr(args, "composer", None):
+        # An explicit --composer beats the hardware profile: the a100 profile
+        # forces engine=ffmpeg for batch speed, but a user asking for moviepy
+        # by name must get moviepy (previously this only downgraded, so the
+        # moviepy arm of the composer A/B silently rendered with ffmpeg).
+        settings = replace(settings, video=replace(settings.video, engine=args.composer))
     # NOTE: the --format reel canvas used to be re-applied here, on top of the
     # profile. It now lives only in config/profiles.py so there is exactly one
     # definition of "reel" in the codebase.
